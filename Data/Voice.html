@@ -12,8 +12,9 @@
         let recognition;
 
         function startRecognition() {
+            output.textContent = "";
             recognition = new webkitSpeechRecognition() || new SpeechRecognition();
-            recognition.lang = '';
+            recognition.lang = 'en';
             recognition.continuous = true;
 
             recognition.onresult = function(event) {

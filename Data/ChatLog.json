@@ -1,66 +1,26 @@
 [
     {
         "role": "user",
-        "content": "Tell about global warming."
-    },
-    {
-        "role": "assistant",
-        "content": "Global warming, also known as climate change, is the gradual increase in the overall temperature of the Earth's atmosphere, primarily caused by human activities that release large amounts of greenhouse gases, such as carbon dioxide and methane, into the atmosphere. These gases trap heat from the sun, leading to a rise in global temperatures. The main causes of global warming are burning fossil fuels, deforestation, and land-use changes. The effects of global warming include more frequent and severe heatwaves, droughts, and storms, as well as rising sea levels, melting of polar ice caps, and altered ecosystems. If left unchecked, global warming can have devastating consequences, including food and water shortages, loss of biodiversity, and significant economic and social impacts."
-    },
-    {
-        "role": "user",
-        "content": "Hello hello."
-    },
-    {
-        "role": "assistant",
-        "content": "Hello!"
-    },
-    {
-        "role": "user",
         "content": "Hello."
     },
     {
         "role": "assistant",
-        "content": "Hi!"
+        "content": "Hello, how can I assist you today?"
     },
     {
         "role": "user",
-        "content": "Hello hello."
+        "content": "Hellooo."
     },
     {
         "role": "assistant",
-        "content": "Hi again!"
+        "content": "Hello, what's on your mind?"
     },
     {
         "role": "user",
-        "content": "Hi hello."
+        "content": "Time."
     },
     {
         "role": "assistant",
-        "content": "Hello back!"
-    },
-    {
-        "role": "user",
-        "content": "What's the time now?"
-    },
-    {
-        "role": "assistant",
-        "content": "It's 12:45:17."
-    },
-    {
-        "role": "user",
-        "content": "Hello hello."
-    },
-    {
-        "role": "assistant",
-        "content": "Hello again!"
-    },
-    {
-        "role": "user",
-        "content": "What time?"
-    },
-    {
-        "role": "assistant",
-        "content": "It's 20:17:19."
+        "content": "It's 12:04:58."
     }
 ]

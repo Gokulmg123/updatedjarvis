@@ -1,16 +1,25 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTextEdit, QStackedWidget, QWidget, QLineEdit, QGridLayout, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QLabel, QSizePolicy
-from PyQt5.QtGui import QIcon, QPainter, QMovie, QColor, QTextCharFormat, QFont, QPixmap, QTextBlockFormat
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QTextEdit, QStackedWidget, QWidget,
+    QLineEdit, QVBoxLayout, QHBoxLayout, QPushButton, QFrame,
+    QLabel, QSizePolicy
+)
+from PyQt5.QtGui import (
+    QIcon, QPainter, QMovie, QColor, QTextCharFormat,
+    QFont, QPixmap, QTextBlockFormat
+)
 from PyQt5.QtCore import Qt, QSize, QTimer
 from dotenv import dotenv_values
 import sys
 import os
-#import shareddata
+
 env_vars = dotenv_values(".env")
 Assistantname = env_vars.get("Assistantname")
 current_dir = os.getcwd()
 old_chat_message = ""
 TempDirPath = rf"{current_dir}\Frontend\Files"
 GraphicsDirPath = rf"{current_dir}\Frontend\Graphics"
+
+TOP_BAR_HEIGHT = 50  # Must match CustomTopBar.setFixedHeight
 
 def AnswerModifier(Answer):
     lines = Answer.split('\n')
@@ -19,23 +28,22 @@ def AnswerModifier(Answer):
     return modified_answer
 
 def QueryModifier(Query):
-
     new_query = Query.lower().strip()
     query_words = new_query.split()
-    question_words = ["how", "what", "who", "where", "when", "why", "which", "whose", "whom", "can you", "what's", "where's", "how's"]
-
+    if not query_words:
+        return ""
+    question_words = ["how", "what", "who", "where", "when", "why", "which", "whose", "whom",
+                      "can you", "what's", "where's", "how's"]
     if any(word + " " in new_query for word in question_words):
         if query_words[-1][-1] in ['.', '?', '!']:
             new_query = new_query[:-1] + "?"
         else:
             new_query += "?"
-
     else:
         if query_words[-1][-1] in ['.', '?', '!']:
-            new_query = new_query[:-1] +"."
+            new_query = new_query[:-1] + "."
         else:
             new_query += "."
-
     return new_query.capitalize()
 
 def SetMicrophoneStatus(Command):
@@ -63,319 +71,409 @@ def MicButtonClosed():
     SetMicrophoneStatus("True")
 
 def GraphicsDirectoryPath(Filename):
-    path = rf'{GraphicsDirPath}\{Filename}'
-    return path
+    return rf'{GraphicsDirPath}\{Filename}'
 
 def TempDirectoryPath(Filename):
-    path = rf'{TempDirPath}\{Filename}'
-    return path
+    return rf'{TempDirPath}\{Filename}'
 
 def ShowTextToScreen(Text):
     with open(rf'{TempDirPath}\Responses.data', "w", encoding='utf-8') as file:
         file.write(Text)
 
+def SetUserQuery(query):
+    with open(TempDirectoryPath('UserQuery.data'), "w", encoding='utf-8') as file:
+        file.write(query)
+
+
+INPUT_ROW_HEIGHT  = 52
+INPUT_ROW_PADDING = 18
+INPUT_CONTAINER_H = INPUT_ROW_HEIGHT + INPUT_ROW_PADDING  # 70 px
+
+
 class ChatSection(QWidget):
 
     def __init__(self):
-        super(ChatSection, self).__init__()
+        super().__init__()
+
+        desktop  = QApplication.desktop()
+        screen_h = desktop.screenGeometry().height()
+
+        # KEY FIX: constrain this widget to the usable height (screen minus top bar).
+        # Without this, the layout can grow to full screen_h and push the input
+        # row below the visible area.
+        usable_h = screen_h - TOP_BAR_HEIGHT
+        self.setFixedHeight(usable_h)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(-10, 40, 40, 100)
-        layout.setSpacing(-100)
+        layout.setContentsMargins(10, 20, 20, 10)
+        layout.setSpacing(8)
+
+        # ── Chat display – stretch=1, takes all remaining space ────────────
         self.chat_text_edit = QTextEdit()
         self.chat_text_edit.setReadOnly(True)
         self.chat_text_edit.setTextInteractionFlags(Qt.NoTextInteraction)
         self.chat_text_edit.setFrameStyle(QFrame.NoFrame)
-        layout.addWidget(self.chat_text_edit)
-        self.setStyleSheet("background-color: black;")
-        layout.setSizeConstraint(QVBoxLayout.SetDefaultConstraint)
-        layout.setStretch(1, 1)
-        self.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
-        text_color = QColor(Qt.blue)
-        text_color_text = QTextCharFormat()
-        text_color_text.setForeground(text_color)
-        self.chat_text_edit.setCurrentCharFormat(text_color_text)
+        self.chat_text_edit.setStyleSheet("background-color: transparent; color: white;")
+        font = QFont()
+        font.setPointSize(13)
+        self.chat_text_edit.setFont(font)
+        layout.addWidget(self.chat_text_edit, stretch=1)
+
+        # ── GIF + status – stretch=0, takes only what it needs ─────────────
+        gif_row = QHBoxLayout()
+        gif_row.setAlignment(Qt.AlignRight)
+
         self.gif_label = QLabel()
         self.gif_label.setStyleSheet("border: none;")
         movie = QMovie(GraphicsDirectoryPath('Jarvis.gif'))
-        max_gif_size_W = 480
-        max_gif_size_H = 270
-        movie.setScaledSize(QSize(max_gif_size_W, max_gif_size_H))
+        movie.setScaledSize(QSize(300, 169))
+        self.gif_label.setFixedSize(300, 169)
         self.gif_label.setAlignment(Qt.AlignRight | Qt.AlignBottom)
         self.gif_label.setMovie(movie)
         movie.start()
-        layout.addWidget(self.gif_label)
+
+        gif_col = QVBoxLayout()
+        gif_col.setSpacing(4)
         self.label = QLabel("")
-        self.label.setStyleSheet("color: white; font-size:16px; margin-right: 195px; border: none; margin-top: -30px")
+        self.label.setStyleSheet("color: #00BFFF; font-size: 15px; border: none;")
         self.label.setAlignment(Qt.AlignRight)
-        layout.addWidget(self.label)
-        layout.setSpacing(-10)
-        layout.addWidget(self.gif_label)     
-        font = QFont()
-        font.setPointSize(13)
-        self.chat_text_edit.setFont(font)       
+        gif_col.addWidget(self.label)
+        gif_col.addWidget(self.gif_label)
+        gif_row.addLayout(gif_col)
+        layout.addLayout(gif_row, stretch=0)
+
+        # ── Input row – fixed height, never clipped ────────────────────────
+        input_container = QWidget()
+        input_container.setFixedHeight(INPUT_CONTAINER_H)
+        input_layout = QHBoxLayout(input_container)
+        input_layout.setContentsMargins(0, INPUT_ROW_PADDING // 2,
+                                        0, INPUT_ROW_PADDING // 2)
+        input_layout.setSpacing(8)
+
+        self.text_field = QLineEdit()
+        self.text_field.setPlaceholderText("Type your message or click 🎤 to speak...")
+        self.text_field.setFixedHeight(INPUT_ROW_HEIGHT)
+        self.text_field.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a2e;
+                color: white;
+                font-size: 16px;
+                border: 2px solid #00BFFF;
+                border-radius: 26px;
+                padding: 0px 18px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #7B2FBE;
+                background-color: #16213e;
+            }
+        """)
+        self.text_field.returnPressed.connect(self.onTextSubmit)
+        self.text_field.mousePressEvent = self.onTextFieldClick
+        input_layout.addWidget(self.text_field, stretch=5)
+
+        self.send_btn = QPushButton("Send")
+        self.send_btn.setFixedSize(80, INPUT_ROW_HEIGHT)
+        self.send_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #7B2FBE, stop:1 #00BFFF);
+                color: white;
+                font-size: 15px;
+                font-weight: bold;
+                border-radius: 26px;
+                border: none;
+            }
+            QPushButton:hover   { background: #00BFFF; }
+            QPushButton:pressed { background: #7B2FBE; }
+        """)
+        self.send_btn.clicked.connect(self.onTextSubmit)
+        input_layout.addWidget(self.send_btn)
+
+        self.mic_toggled = False
+        self.mic_btn = QPushButton("🎤")
+        self.mic_btn.setFixedSize(INPUT_ROW_HEIGHT, INPUT_ROW_HEIGHT)
+        self.mic_btn.setToolTip("Toggle voice input")
+        self.mic_btn.setStyleSheet(self._mic_btn_style(False))
+        self.mic_btn.clicked.connect(self.toggleMic)
+        input_layout.addWidget(self.mic_btn)
+
+        self.cam_btn = QPushButton("📷")
+        self.cam_btn.setFixedSize(INPUT_ROW_HEIGHT, INPUT_ROW_HEIGHT)
+        self.cam_btn.setToolTip("Open virtual camera keyboard")
+        self.cam_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1a1a2e;
+                color: white;
+                font-size: 22px;
+                border: 2px solid #00BFFF;
+                border-radius: 26px;
+            }
+            QPushButton:hover { background-color: #16213e; border-color: #7B2FBE; }
+        """)
+        self.cam_btn.clicked.connect(self.openCameraKeyboard)
+        input_layout.addWidget(self.cam_btn)
+
+        layout.addWidget(input_container, stretch=0)
+
+        self.setStyleSheet("""
+            background-color: #0a0a1a;
+            QScrollBar:vertical {
+                border: none; background: #0a0a1a; width: 8px; margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #00BFFF; min-height: 20px; border-radius: 4px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                background: none; height: 0;
+            }
+        """)
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.loadMessages)
-        self.timer.timeout.connect(self.SpeechRecogText)
-        self.timer.start(5)
-        self.chat_text_edit.viewport().installEventFilter(self)
-        self.setStyleSheet("""
-        QScrollBar:vertical {
-                border: none;
-                background: black;
-                width: 10px;
-                margin: 0px 0px 0px 0px;
+        self.timer.timeout.connect(self.RefreshStatus)
+        self.timer.start(100)
+        self._cam_keyboard_proc = None
+
+    def _mic_btn_style(self, active):
+        if active:
+            return """
+                QPushButton {
+                    background-color: #c0392b;
+                    color: white; font-size: 22px;
+                    border-radius: 26px; border: none;
+                }
+                QPushButton:hover { background-color: #e74c3c; }
+            """
+        return """
+            QPushButton {
+                background-color: #1a1a2e;
+                color: white; font-size: 22px;
+                border: 2px solid #00BFFF;
+                border-radius: 26px;
             }
+            QPushButton:hover { background-color: #7B2FBE; border-color: #7B2FBE; }
+        """
 
-            QScrollBar::handle:vertical {
-                background: white;
-                min-height: 20px;
-            }
+    def onTextFieldClick(self, event):
+        QLineEdit.mousePressEvent(self.text_field, event)
 
-            QScrollBar::add-line:vertical {
-                background: black;
-                subcontrol-position: bottom;
-                subcontrol-origin: margin;
-                height: 10px;
-            }
-
-            QScrollBar::sub-line:vertical {
-                background: black;
-                subcontrol-position: top;
-                subcontrol-origin: margin;
-                height: 10px;
-            }
-
-            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
-                border: none;
-                background: none;
-                color: none;
-            }
-
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
-     """)
-        self.text_field = QLineEdit(self)
-        self.text_field.setPlaceholderText("Type something...")
-        self.text_field.setFixedSize(1000, 70)
-        self.text_field.setStyleSheet("""
-    QLineEdit {
-        background-color: lightgrey;    /* Background color */
-        color: black;                   /* Text color */
-        font-size: 18px;                /* Bigger font size */
-        border: 2px solid black;        /* Border width and color */
-        border-radius: 25px;            /* Half of height (50px) to fully round */
-        padding: 10px;                  /* Inner spacing */
-    }
-    QLineEdit::placeholder {
-        color: red;                     /* Placeholder text color */
-        font-style: italic;             /* Italic style for placeholder */
-    }
-""")
-        self.text_field.textChanged.connect(self.on_text_change)
-        self.text_field.returnPressed.connect(self.onentered)
-        layout.addWidget(self.text_field)
-
-
-
-    def on_text_change(self):
-        self.last_text_query = self.text_field.text().strip()
-        return self.last_text_query
-    
-
-
-
-
-    def onentered(self):
+    def onTextSubmit(self):
         query = self.text_field.text().strip()
-        self.last_text_query = query
-    
+        if not query:
+            return
         self.text_field.clear()
-        """with open(TempDirectoryPath('UserQuery.data'), "w", encoding='utf-8') as file:
-            file.write(query)"""
+        SetUserQuery(query)
         SetMicrophoneStatus("True")
-       
-    def loadMessages(self):
 
-        global old_chat_message
+    def toggleMic(self):
+        self.mic_toggled = not self.mic_toggled
+        self.mic_btn.setStyleSheet(self._mic_btn_style(self.mic_toggled))
+        if self.mic_toggled:
+            MicButtonClosed()
+        else:
+            MicButtonInitialed()
 
-        with open(TempDirectoryPath('Responses.data'), "r", encoding='utf-8') as file:
-            messages = file.read()
-
-            if None == messages:
-                pass
-
-            elif len(messages)<=1:
-                pass
-
-            elif str(old_chat_message) == str(messages):
-                pass
-
+    def openCameraKeyboard(self):
+        import subprocess
+        try:
+            cam_kb_script = os.path.join(current_dir, "Backend", "CameraKeyboard.py")
+            if os.path.exists(cam_kb_script):
+                if self._cam_keyboard_proc and self._cam_keyboard_proc.poll() is None:
+                    return
+                self._cam_keyboard_proc = subprocess.Popen(
+                    [sys.executable, cam_kb_script],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                self.text_field.setFocus()
             else:
+                self.addMessage("Camera keyboard module not found.", "orange")
+        except Exception as e:
+            self.addMessage(f"Could not open camera keyboard: {e}", "red")
+
+    def loadMessages(self):
+        global old_chat_message
+        try:
+            with open(TempDirectoryPath('Responses.data'), "r", encoding='utf-8') as file:
+                messages = file.read()
+            if messages and len(messages) > 1 and str(old_chat_message) != str(messages):
                 self.addMessage(message=messages, color='White')
                 old_chat_message = messages
+        except Exception:
+            pass
 
-    def SpeechRecogText(self):
-        with open(TempDirectoryPath('Status.data'), "r", encoding='utf-8') as file:
-            messages = file.read()
-            self.label.setText(messages)
-
-    def load_icon(self, path, width=60, height=60):
-        pixmap = QPixmap(path)
-        new_pixmap = pixmap.scaled(width, height)
-        self.icon_label.setPixmap(new_pixmap)
-
-    def toggle_icon(self, event=None):
-
-        if self.toggled:
-            self.load_icon(GraphicsDirectoryPath('voice.png'), 60, 60)
-            MicButtonInitialed()
-        
-        else:
-            self.load_icon(GraphicsDirectoryPath('mic.png'),60, 60)
-            MicButtonClosed()
-        
-        self.toggled = not self.toggled
+    def RefreshStatus(self):
+        try:
+            with open(TempDirectoryPath('Status.data'), "r", encoding='utf-8') as file:
+                self.label.setText(file.read())
+        except Exception:
+            pass
 
     def addMessage(self, message, color):
         cursor = self.chat_text_edit.textCursor()
-        format = QTextCharFormat()
-        formatm = QTextBlockFormat()
-        formatm.setTopMargin(10)
-        formatm.setLeftMargin(10)
-        format.setForeground(QColor(color))
-        cursor.setCharFormat(format)
-        cursor.setBlockFormat(formatm)
+        fmt  = QTextCharFormat()
+        fmtb = QTextBlockFormat()
+        fmtb.setTopMargin(10)
+        fmtb.setLeftMargin(10)
+        fmt.setForeground(QColor(color))
+        cursor.setCharFormat(fmt)
+        cursor.setBlockFormat(fmtb)
         cursor.insertText(message + "\n")
         self.chat_text_edit.setTextCursor(cursor)
+        self.chat_text_edit.ensureCursorVisible()
+
 
 class initialScreen(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        desktop = QApplication.desktop()
+        desktop      = QApplication.desktop()
         screen_width = desktop.screenGeometry().width()
-        screen_height = desktop.screenGeometry().height()
-        content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        screen_height= desktop.screenGeometry().height()
+
+        usable_h = screen_height - TOP_BAR_HEIGHT
+        self.setFixedSize(screen_width, usable_h)
+        self.setStyleSheet("background-color: #0a0a1a;")
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # All home-screen elements in one tight group so they look unified
+        group = QWidget()
+        group.setStyleSheet("background-color: transparent;")
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(0, 0, 0, 0)
+        group_layout.setSpacing(10)
+        group_layout.setAlignment(Qt.AlignCenter)
+
+        gif_h = int(usable_h * 0.55)
+        gif_w = min(int(gif_h / 9 * 16), screen_width)
+        gif_h = int(gif_w / 16 * 9)
+
         gif_label = QLabel()
-        movie = QMovie(GraphicsDirectoryPath('jarvis.gif'))
+        movie = QMovie(GraphicsDirectoryPath('Jarvis.gif'))
+        movie.setScaledSize(QSize(gif_w, gif_h))
         gif_label.setMovie(movie)
-        max_gif_size_H = int(screen_width/16 * 9)
-        movie.setScaledSize(QSize(screen_width, max_gif_size_H))
+        gif_label.setFixedSize(gif_w, gif_h)
         gif_label.setAlignment(Qt.AlignCenter)
         movie.start()
-        gif_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.label = QLabel("")
+        self.label.setStyleSheet("color: #00BFFF; font-size: 16px; background: transparent;")
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setFixedHeight(26)
+
         self.icon_label = QLabel()
-        pixmap = QPixmap(GraphicsDirectoryPath('Mic_on.png'))
-        new_pixmap = pixmap.scaled(60, 60)
-        self.icon_label.setPixmap(new_pixmap)
-        self.icon_label.setFixedSize(150, 150)
+        self.icon_label.setFixedSize(80, 80)
         self.icon_label.setAlignment(Qt.AlignCenter)
+        self.icon_label.setStyleSheet("background: transparent; border: none;")
+        self.icon_label.setCursor(Qt.PointingHandCursor)
         self.toggled = True
         self.toggle_icon()
         self.icon_label.mousePressEvent = self.toggle_icon
-        self.label = QLabel("")
-        self.label.setStyleSheet("color: white; font-size:16px; margin-bottom:0;")
-        content_layout.addWidget(gif_label, alignment=Qt.AlignCenter)
-        content_layout.addWidget(self.label, alignment=Qt.AlignCenter)
-        content_layout.addWidget(self.icon_label, alignment=Qt.AlignCenter)
-        content_layout.setContentsMargins(0, 0, 0, 150)
-        self.setLayout(content_layout)
-        self.setFixedHeight(screen_height)
-        self.setFixedWidth(screen_width)
-        self.setStyleSheet("background-color: black;")
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.SpeechRecogText)
-        self.timer.start(5)
 
-    def SpeechRecogText(self):
-        with open(TempDirectoryPath('Status.data'), "r", encoding='utf-8') as file:
-            messages = file.read()
-            self.label.setText(messages)
+        group_layout.addWidget(gif_label,       alignment=Qt.AlignCenter)
+        group_layout.addWidget(self.label,      alignment=Qt.AlignCenter)
+        group_layout.addWidget(self.icon_label, alignment=Qt.AlignCenter)
+
+        outer.addStretch(1)
+        outer.addWidget(group, alignment=Qt.AlignCenter)
+        outer.addStretch(1)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.RefreshStatus)
+        self.timer.start(100)
+
+    def RefreshStatus(self):
+        try:
+            with open(TempDirectoryPath('Status.data'), "r", encoding='utf-8') as file:
+                self.label.setText(file.read())
+        except Exception:
+            pass
 
     def load_icon(self, path, width=60, height=60):
-        pixmap = QPixmap(path)
-        new_pixmap = pixmap.scaled(width, height)
-        self.icon_label.setPixmap(new_pixmap)
+        pixmap = QPixmap(path).scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.icon_label.setPixmap(pixmap)
 
     def toggle_icon(self, event=None):
-
         if self.toggled:
-            self.load_icon(GraphicsDirectoryPath('Mic_on.png'), 60, 60)
+            self.load_icon(GraphicsDirectoryPath('Mic_on.png'),  60, 60)
             MicButtonInitialed()
-
         else:
             self.load_icon(GraphicsDirectoryPath('Mic_off.png'), 60, 60)
             MicButtonClosed()
-
         self.toggled = not self.toggled
+
 
 class MessageScreen(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        desktop = QApplication.desktop()
+        desktop      = QApplication.desktop()
         screen_width = desktop.screenGeometry().width()
-        screen_height = desktop.screenGeometry().height()
-        layout = QVBoxLayout()
-        label = QLabel("")
-        layout.addWidget(label)
-        chat_section = ChatSection()
-        layout.addWidget(chat_section)
-        self.setLayout(layout)
-        self.setStyleSheet("background-color: black;")
-        self.setFixedHeight(screen_height)
-        self.setFixedWidth(screen_width)
+        screen_height= desktop.screenGeometry().height()
+
+        usable_h = screen_height - TOP_BAR_HEIGHT
+        self.setFixedSize(screen_width, usable_h)
+        self.setStyleSheet("background-color: #0a0a1a;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(ChatSection())
+
 
 class CustomTopBar(QWidget):
 
     def __init__(self, parent, stacked_widget):
         super().__init__(parent)
-        self.initUI()
-        self.current_screen = None
         self.stacked_widget = stacked_widget
+        self.initUI()
 
     def initUI(self):
-        self.setFixedHeight(50)
+        self.setFixedHeight(TOP_BAR_HEIGHT)
         layout = QHBoxLayout(self)
-        layout.setAlignment(Qt.AlignRight)
+        layout.setContentsMargins(10, 0, 10, 0)
+
+        title_label = QLabel(f"  {str(Assistantname).capitalize()} AI  ")
+        title_label.setStyleSheet(
+            "color: #00BFFF; font-size: 18px; font-weight: bold; background-color: transparent;")
+
         home_button = QPushButton()
-        home_icon = QIcon(GraphicsDirectoryPath("Home.png"))
-        home_button.setIcon(home_icon)
+        home_button.setIcon(QIcon(GraphicsDirectoryPath("Home.png")))
         home_button.setText("  Home")
-        home_button.setStyleSheet("height:40px; line-height:40px; background-color:white; color:black")
+        home_button.setStyleSheet(
+            "height:40px; background-color: #1a1a2e; color: white;"
+            " border: 1px solid #00BFFF; border-radius:5px; padding: 0 10px;")
+
         message_button = QPushButton()
-        message_icon = QIcon(GraphicsDirectoryPath("Chats.png"))
-        message_button.setIcon(message_icon)
+        message_button.setIcon(QIcon(GraphicsDirectoryPath("Chats.png")))
         message_button.setText("  Chat")
-        message_button.setStyleSheet("height:40px; line-height:40px; background-color:white; color:black")
-        minimize_button = QPushButton()
-        minimize_icon = QIcon(GraphicsDirectoryPath('Minimize2.png'))
-        minimize_button.setIcon(minimize_icon)
-        minimize_button.setStyleSheet("background-color:white")
+        message_button.setStyleSheet(
+            "height:40px; background-color: #1a1a2e; color: white;"
+            " border: 1px solid #00BFFF; border-radius:5px; padding: 0 10px;")
+
+        minimize_button = QPushButton("—")
+        minimize_button.setFixedSize(36, 36)
+        minimize_button.setStyleSheet(
+            "background-color:#1a1a2e; color:white; border:none; font-size:18px; border-radius:4px;")
         minimize_button.clicked.connect(self.minimizeWindow)
-        self.maximize_button = QPushButton()
-        self.maximize_icon = QIcon(GraphicsDirectoryPath('Maximize.png'))
-        self.restore_icon = QIcon(GraphicsDirectoryPath('minimize.png'))
-        self.maximize_button.setIcon(self.maximize_icon)
-        self.maximize_button.setFlat(True)
-        self.maximize_button.setStyleSheet("background=color:white")
+
+        self.maximize_button = QPushButton("□")
+        self.maximize_button.setFixedSize(36, 36)
+        self.maximize_button.setStyleSheet(
+            "background-color:#1a1a2e; color:white; border:none; font-size:18px; border-radius:4px;")
         self.maximize_button.clicked.connect(self.maximizeWindow)
-        close_button = QPushButton()
-        close_icon = QIcon(GraphicsDirectoryPath('Close.png'))
-        close_button.setIcon(close_icon)
-        close_button.setStyleSheet("background-color:white")
+
+        close_button = QPushButton("✕")
+        close_button.setFixedSize(36, 36)
+        close_button.setStyleSheet(
+            "background-color:#c0392b; color:white; border:none; font-size:16px; border-radius:4px;")
         close_button.clicked.connect(self.closeWindow)
-        line_frame = QFrame()
-        line_frame.setFixedHeight(1)
-        line_frame.setFrameShape(QFrame.HLine)
-        line_frame.setFrameShadow(QFrame.Sunken)
-        line_frame.setStyleSheet("border-color:black;")
-        title_label = QLabel(f" {str(Assistantname).capitalize()} AI  ")
-        title_label.setStyleSheet("color:black; font-size: 18px;; background-color:white")
+
         home_button.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(0))
         message_button.clicked.connect(lambda: self.stacked_widget.setCurrentIndex(1))
+
         layout.addWidget(title_label)
         layout.addStretch(1)
         layout.addWidget(home_button)
@@ -384,28 +482,23 @@ class CustomTopBar(QWidget):
         layout.addWidget(minimize_button)
         layout.addWidget(self.maximize_button)
         layout.addWidget(close_button)
-        layout.addWidget(line_frame)
+
         self.draggable = True
-        self.offset = None
+        self.offset    = None
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), Qt.white)
+        painter.fillRect(self.rect(), QColor("#0d0d1f"))
         super().paintEvent(event)
 
-    def minimizeWindow(self):
-        self.parent().showMinimized()
+    def minimizeWindow(self):  self.parent().showMinimized()
+    def closeWindow(self):     self.parent().close()
 
     def maximizeWindow(self):
         if self.parent().isMaximized():
             self.parent().showNormal()
-            self.maximize_button.setIcon(self.maximize_icon)
         else:
             self.parent().showMaximized()
-            self.maximize_button.setIcon(self.restore_icon)
-
-    def closeWindow(self):
-        self.parent().close()
 
     def mousePressEvent(self, event):
         if self.draggable:
@@ -413,56 +506,37 @@ class CustomTopBar(QWidget):
 
     def mouseMoveEvent(self, event):
         if self.draggable and self.offset:
-            new_pos = event.globalPos() - self.offset
-            self.parent().move(new_pos)
+            self.parent().move(event.globalPos() - self.offset)
 
-    def showMessageScreen(self):
-        if self.current_screen is not None:
-            self.current_screen.hide()
-
-        message_screen = MessageScreen(self)
-        layout = self.parent().layout()
-        if layout is not None:
-            layout.addWidget(message_screen)
-        self.current_screen = message_screen
-
-    def showInitialScrren(self):
-        if self.current_screen is not None:
-            self.current_screen.hide()
-
-        initial_screen = initialScreen(self)
-        layout = self.parent().layout()
-        if layout is not None:
-            layout.addWidget(initial_screen)
-        self.current_screen = initial_screen
 
 class MainWindow(QMainWindow):
-    
+
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.initUI()
 
     def initUI(self):
-        desktop = QApplication.desktop()
+        desktop      = QApplication.desktop()
         screen_width = desktop.screenGeometry().width()
-        screen_height = desktop.screenGeometry().height()
-        stacked_width = QStackedWidget(self)
-        initial_screen = initialScreen()
-        message_screen = MessageScreen()
-        stacked_width.addWidget(initial_screen)
-        stacked_width.addWidget(message_screen)
+        screen_height= desktop.screenGeometry().height()
+
+        stacked = QStackedWidget(self)
+        stacked.addWidget(initialScreen())
+        stacked.addWidget(MessageScreen())
+
         self.setGeometry(0, 0, screen_width, screen_height)
-        self.setStyleSheet("background-color: black;")
-        top_bar = CustomTopBar(self, stacked_width)
-        self.setMenuWidget(top_bar)
-        self.setCentralWidget(stacked_width)
-        
+        self.setStyleSheet("background-color: #0a0a1a;")
+        self.setMenuWidget(CustomTopBar(self, stacked))
+        self.setCentralWidget(stacked)
+
+
 def GraphicalUserInterface():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     GraphicalUserInterface()

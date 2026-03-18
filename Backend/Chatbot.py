@@ -26,8 +26,7 @@ SystemChatBot = [
 try:
     with open(r"Data\ChatLog.json", "r") as f:
         messages = load(f)
-except FileNotFoundError:
-
+except (FileNotFoundError, JSONDecodeError):
     with open(r"Data\ChatLog.json", "w") as f:
         dump([], f)
 
@@ -53,22 +52,22 @@ def AnswerModifier(Answer):
     return modified_answer
 
 def ChatBot(Query):
-    """ This function sends the user's query to the chatbot and returns the AI's response. """
+    """Sends the user's query to the chatbot and returns the AI's response."""
 
     try:
         with open(r"Data\ChatLog.json", "r") as f:
-            messages = load(f)  
+            messages = load(f)
 
         messages.append({"role": "user", "content": Query})
 
         completion = client.chat.completions.create(
-          model="llama3-70b-8192",
-          messages=SystemChatBot + [{"role": "system", "content": RealtimeInformation()}] + messages,
-          max_tokens=1024,
-          temperature=0.7,
-          top_p=1,
-          stream=True,
-          stop=None
+            model="llama-3.3-70b-versatile",  # Updated: llama3-70b-8192 is deprecated
+            messages=SystemChatBot + [{"role": "system", "content": RealtimeInformation()}] + messages,
+            max_tokens=1024,
+            temperature=0.7,
+            top_p=1,
+            stream=True,
+            stop=None
         )
 
         Answer = ""
@@ -87,11 +86,14 @@ def ChatBot(Query):
         return AnswerModifier(Answer=Answer)
 
     except Exception as e:
-
-        print(f"Error: {e}")
-        with open(r"Data\ChatLog.json", "w") as f:
-            dump([], f, indent=4)
-        return ChatBot(Query)
+        print(f"[ChatBot Error]: {e}")
+        # Reset chat log on error and return a safe fallback message
+        try:
+            with open(r"Data\ChatLog.json", "w") as f:
+                dump([], f, indent=4)
+        except:
+            pass
+        return "I encountered an issue. Please try again."
 
 
 if __name__ == "__main__":
