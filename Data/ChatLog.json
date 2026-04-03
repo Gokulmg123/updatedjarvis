@@ -5,22 +5,38 @@
     },
     {
         "role": "assistant",
-        "content": "Hello, how can I assist you today?"
+        "content": "Hello, how can I assist you?"
     },
     {
         "role": "user",
-        "content": "Hellooo."
+        "content": "Hi."
     },
     {
         "role": "assistant",
-        "content": "Hello, what's on your mind?"
+        "content": "Hi, what's on your mind?"
     },
     {
         "role": "user",
-        "content": "Time."
+        "content": "Hello."
     },
     {
         "role": "assistant",
-        "content": "It's 12:04:58."
+        "content": "Hello, is there something I can help you with?"
+    },
+    {
+        "role": "user",
+        "content": "Whats the time today."
+    },
+    {
+        "role": "assistant",
+        "content": "It's 11:57:08."
+    },
+    {
+        "role": "user",
+        "content": "Hello."
+    },
+    {
+        "role": "assistant",
+        "content": "Hello, how are you?"
     }
 ]
