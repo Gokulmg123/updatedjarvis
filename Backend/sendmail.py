@@ -26,14 +26,24 @@ def generate_email_body(subject: str) -> str:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional email writer. "
-                        "Write concise, polished emails based on the given subject. "
-                        "Include a greeting, body, and a proper closing statement."
-                    ),
-                },
+               {
+    "role": "system",
+    "content": (
+        "You are a professional email writer.\n"
+        "Write concise, natural, and realistic emails.\n\n"
+
+        "STRICT RULES:\n"
+        "- NEVER use placeholders like [Name], [Your Name], [Company], etc.\n"
+        "- NEVER write 'Dear Sir/Madam'. Use a natural greeting like 'Hello' or omit if unknown.\n"
+        "- NEVER include bracketed text.\n"
+        "- Do NOT leave blanks for the user to fill.\n"
+        "- Use a real-world tone, as if the sender is writing directly.\n"
+        "- End with a simple closing like 'Best regards' or 'Thanks'.\n"
+        "- Keep it human-like, not robotic or templated.\n\n"
+
+        "Write complete, ready-to-send emails only."
+    ),
+},
                 {
                     "role": "user",
                     "content": f"Write a professional email about: {subject}",
@@ -72,40 +82,88 @@ def compose_email(subject: str) -> str:
     return body
 
 
-def sendmail(subject: str):
-    """Compose and send an AI-generated email. Prompts for recipient email."""
+def parse_mail_query(query: str):
+    """
+    Parse a query of the form '<subject> to <recipient@email.com>'.
+    Returns (subject, recipient_email).
+    If no email is found, recipient_email is None.
+
+    Examples:
+        'job to gokul@gmail.com'          -> ('job', 'gokul@gmail.com')
+        'interview invitation to hr@x.com' -> ('interview invitation', 'hr@x.com')
+        'project update'                  -> ('project update', None)
+    """
+    import re
+    # Match " to <email>" pattern — email regex keeps original case
+    match = re.search(
+        r'\bto\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})',
+        query, re.IGNORECASE
+    )
+    if match:
+        receiver_email = match.group(1)          # original case preserved
+        subject = query[:match.start()].strip()  # everything before ' to <email>'
+        if not subject:
+            subject = "Important Update"
+        return subject, receiver_email
+    # No email found in query
+    return query.strip(), None
+
+
+def sendmail(query: str) -> str:
+    """
+    Compose and send an AI-generated email.
+    'query' is a natural-language string like 'job to gokul@gmail.com'.
+    Returns a status message string.
+    """
+    subject, receiver_email = parse_mail_query(query)
+
+    if not receiver_email:
+        msg = (
+            "\u274c Could not find a recipient email in your request.\n"
+            "   Please say something like:\n"
+            "   'Send an email about job to gokul@gmail.com'"
+        )
+        print(msg)
+        return msg
+
+    print(f"[sendmail] Subject   : {subject}")
+    print(f"[sendmail] Recipient : {receiver_email}")
+
     body = compose_email(subject)
     print(f"\n[Generated Email]\n{body}\n")
 
     if not SenderEmail or not SenderPass:
-        print(
-            "❌ Missing email credentials.\n"
+        msg = (
+            "\u274c Missing email credentials.\n"
             "   Add SenderEmail and SenderPassword to your .env file."
         )
-        return
+        print(msg)
+        return msg
 
-    receiver_email = input("Enter recipient email address: ").strip()
-    if not receiver_email:
-        print("❌ No recipient provided. Aborting.")
-        return
-
-    msg = MIMEMultipart()
-    msg["From"]    = SenderEmail
-    msg["To"]      = receiver_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    email_msg = MIMEMultipart()
+    email_msg["From"]    = SenderEmail
+    email_msg["To"]      = receiver_email
+    email_msg["Subject"] = subject
+    email_msg.attach(MIMEText(body, "plain"))
 
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(SenderEmail, SenderPass)
-        server.sendmail(SenderEmail, receiver_email, msg.as_string())
+        server.sendmail(SenderEmail, receiver_email, email_msg.as_string())
         server.quit()
-        print(f"✅ Email sent successfully to {receiver_email}")
+        status = f"\u2705 Email sent successfully to {receiver_email}"
+        print(status)
+        return status
     except Exception as e:
-        print(f"❌ Failed to send email: {e}")
+        status = f"\u274c Failed to send email: {e}"
+        print(status)
+        return status
 
 
 if __name__ == "__main__":
-    topic = input("Enter email subject/topic: ").strip()
-    sendmail(topic)
+    # CLI test: python sendmail.py
+    # Example input: job to gokul@gmail.com
+    raw = input("Enter query (e.g. 'job to gokul@gmail.com'): ").strip()
+    result = sendmail(raw)
+    print(result)

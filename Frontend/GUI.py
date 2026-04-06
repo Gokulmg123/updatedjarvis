@@ -238,18 +238,8 @@ class ChatSection(QWidget):
         self.cam_btn.clicked.connect(self._requestCameraKeyboard)
         input_layout.addWidget(self.cam_btn)
 
-        self.yt_btn = QPushButton("▶")
-        self.yt_btn.setFixedSize(INPUT_ROW_HEIGHT, INPUT_ROW_HEIGHT)
-        self.yt_btn.setToolTip("Open YouTube Gesture Controller")
-        self.yt_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1a1a2e; color: #FF0000; font-size: 20px;
-                border: 2px solid #FF0000; border-radius: 26px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #3a0000; border-color: #FF4444; }
-        """)
-        self.yt_btn.clicked.connect(self._requestYouTubeController)
-        input_layout.addWidget(self.yt_btn)
+        # ── YouTube button REMOVED — controller auto-activates when YouTube
+        # is open in Chrome (see MessageScreen._yt_ctrl auto-monitor). ──────
 
         layout.addWidget(input_container, stretch=0)
 
@@ -318,14 +308,7 @@ class ChatSection(QWidget):
                 return
             parent = parent.parent()
 
-    def _requestYouTubeController(self):
-        """Walk up to MessageScreen and ask it to show the YouTube gesture controller."""
-        parent = self.parent()
-        while parent is not None:
-            if isinstance(parent, MessageScreen):
-                parent.showYouTubeController()
-                return
-            parent = parent.parent()
+    # _requestYouTubeController : removed — controller is now auto-launched
 
     def loadMessages(self):
         global old_chat_message
@@ -398,12 +381,22 @@ class MessageScreen(QWidget):
         self._cam_kb.closed.connect(self.hideCameraKeyboard)
         self._pages.addWidget(self._cam_kb)
 
-        # Page 2 — YouTube gesture controller
+        # Page 2 — YouTube gesture controller (auto-activated)
         self._yt_ctrl = YouTubeGestureWidget()
-        self._yt_ctrl.closed.connect(self.hideYouTubeController)
+        # Auto-show: YouTube appeared in Chrome
+        self._yt_ctrl.yt_detected.connect(self._autoShowYouTubeController)
+        # Auto-hide: YouTube closed in Chrome
+        self._yt_ctrl.yt_lost.connect(self._autoHideYouTubeController)
+        # Manual close button inside the widget
+        self._yt_ctrl.closed.connect(self._autoHideYouTubeController)
         self._pages.addWidget(self._yt_ctrl)
 
         layout.addWidget(self._pages)
+
+        # ── Auto-start the YouTube monitor right away ─────────────────────────
+        # The monitor runs silently in the background.  When it detects
+        # YouTube it fires yt_detected → _autoShowYouTubeController.
+        self._yt_ctrl.start()
 
     # ── Public helpers called by ChatSection ──────────────────────────────────
 
@@ -415,13 +408,19 @@ class MessageScreen(QWidget):
         self._cam_kb.stop()
         self._pages.setCurrentIndex(0)
 
-    def showYouTubeController(self):
-        self._pages.setCurrentIndex(2)
-        self._yt_ctrl.start()
+    # ── Auto YouTube controller helpers ───────────────────────────────────────
 
-    def hideYouTubeController(self):
-        self._yt_ctrl.stop()
-        self._pages.setCurrentIndex(0)
+    def _autoShowYouTubeController(self):
+        """Called automatically when YouTube is detected in Chrome."""
+        # Don't steal focus from camera keyboard if it's open
+        if self._pages.currentIndex() != 1:
+            self._pages.setCurrentIndex(2)
+
+    def _autoHideYouTubeController(self):
+        """Called when YouTube closes or user hits ✕ in the widget."""
+        # Return to chat only if we are currently showing the YT controller
+        if self._pages.currentIndex() == 2:
+            self._pages.setCurrentIndex(0)
 
     # ── Route camera-keyboard query into the same pipeline ────────────────────
 
@@ -462,9 +461,8 @@ class initialScreen(QWidget):
         group_layout.setSpacing(10)
         group_layout.setAlignment(Qt.AlignCenter)
 
-        gif_h = int(usable_h * 0.55)
-        gif_w = min(int(gif_h / 9 * 16), screen_width)
-        gif_h = int(gif_w / 16 * 9)
+        gif_h = screen_height
+        gif_w = screen_width
 
         gif_label = QLabel()
         movie = QMovie(GraphicsDirectoryPath('Jarvis.gif'))

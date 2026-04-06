@@ -206,8 +206,9 @@ def MainExecution():
                 elif "send mail" in Queries:
                     SetAssistantStatus("Sending email...")
                     QueryFinal = Queries.replace("send mail", "").strip()
-                    sendmail(QueryFinal)
-                    SetAssistantStatus("Email sent successfully.")
+                    result = sendmail(QueryFinal)
+                    ShowTextToScreen(f"{Assistantname} : {result}")
+                    SetAssistantStatus("Available ... ")
 
                 elif "exit" in Queries:
                     QueryFinal = "Okay, Bye!"

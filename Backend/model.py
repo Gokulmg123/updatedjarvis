@@ -33,7 +33,9 @@ You decide whether a query is 'general', 'realtime', or is asking to perform a t
 -> Respond with 'content (topic)' to write content (essays, code, etc.)
 -> Respond with 'google search (topic)' to search Google.
 -> Respond with 'youtube search (topic)' to search YouTube.
--> Respond with 'send mail (subject)' to compose and send an email.
+-> Respond with 'send mail (subject) to (recipient email)' to compose and send an email. Always include the recipient email address if mentioned.
+   Example: 'send an email about job to gokul@gmail.com' → 'send mail job to gokul@gmail.com'
+   Example: 'send a mail about interview to hr@company.com' → 'send mail interview to hr@company.com'
 -> Respond with 'exit' if the user wants to end the conversation.
 *** For multiple tasks: 'open facebook, telegram and close whatsapp' → 'open facebook, open telegram, close whatsapp' ***
 *** Respond with 'general (query)' if you can't classify it. ***
@@ -57,6 +59,10 @@ few_shot_messages = [
     {"role": "assistant", "content": "general what is today's date"},
     {"role": "user", "content": "who is elon musk"},
     {"role": "assistant", "content": "realtime who is elon musk"},
+    {"role": "user", "content": "send an email about job to gokul@gmail.com"},
+    {"role": "assistant", "content": "send mail job to gokul@gmail.com"},
+    {"role": "user", "content": "send a mail about interview invitation to hr@company.com"},
+    {"role": "assistant", "content": "send mail interview invitation to hr@company.com"},
 ]
 
 def FirstLayerDMM(prompt: str = "test"):
