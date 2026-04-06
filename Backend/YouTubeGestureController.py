@@ -24,6 +24,13 @@ Gesture Map
   🤙  Pinky only       →  Next video  (Shift+N)
   👍  Thumb only       →  Previous video  (Shift+P)
   🤏  Thumb+Idx pinch  →  Volume  (raise = vol up, lower = vol down)
+
+FIXES APPLIED
+-------------
+  1. cv2.error on cap.release() — wrapped in try/except (OpenCV/DirectShow bug).
+  2. Prefer CAP_MSMF over CAP_DSHOW — more stable on modern Windows.
+  3. Added pre-release cleanup step before cap.release().
+  4. Worker thread join timeout increased for safer shutdown.
 """
 
 # ── stdlib ────────────────────────────────────────────────────────────────────
@@ -333,7 +340,7 @@ class _YTWorker(QThread):
 
     def stop(self):
         self._running = False
-        self.wait(4000)
+        self.wait(5000)   # FIX: increased from 4000 → 5000 ms for safer shutdown
 
     @classmethod
     def _ensure_model(cls):
@@ -347,17 +354,49 @@ class _YTWorker(QThread):
         except Exception:
             return False
 
+    # ── FIX: safe camera release helper ──────────────────────────────────────
+    @staticmethod
+    def _safe_release(cap):
+        """
+        Release a VideoCapture object without raising on the known
+        OpenCV / DirectShow / MSMF cleanup exception on Windows.
+        """
+        if cap is None:
+            return
+        try:
+            # Drain any pending frames so the driver buffer is clean
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        except Exception:
+            pass
+        try:
+            cap.release()
+        except Exception:
+            pass  # Swallow cv2.error from DirectShow/MSMF teardown (harmless)
+
     def run(self):
+        cap = None   # FIX: initialise to None so finally block is always safe
+
         # ── 1. Model ─────────────────────────────────────────────────────────
         if not self._ensure_model():
             self.error.emit("❌ Cannot load hand_landmarker.task model.")
             return
 
-        # ── 2. Camera ─────────────────────────────────────────────────────────
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
+        # ── 2. Camera  (FIX: prefer MSMF → fall back to DSHOW → raw index) ──
+        # CAP_MSMF (Media Foundation) is more stable on Windows 10/11 than the
+        # older DirectShow backend and avoids the teardown exception.
+        for backend in (cv2.CAP_MSMF, cv2.CAP_DSHOW, None):
+            try:
+                cap = (cv2.VideoCapture(0, backend)
+                       if backend is not None
+                       else cv2.VideoCapture(0))
+                if cap.isOpened():
+                    break
+                self._safe_release(cap)
+                cap = None
+            except Exception:
+                cap = None
+
+        if cap is None or not cap.isOpened():
             self.error.emit("❌ Camera not available.")
             return
 
@@ -671,7 +710,9 @@ class _YTWorker(QThread):
                     self.frame_ready.emit(frame)
 
         finally:
-            cap.release()
+            # FIX: use safe_release — swallows the cv2.error thrown by
+            # DirectShow / MSMF drivers during teardown on Windows.
+            self._safe_release(cap)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
