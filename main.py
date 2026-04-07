@@ -33,6 +33,23 @@ DefaultMessage = f'''{Username} : Hello {Assistantname}, How are you?
 subprocesses = []
 Functions = ["open", "close", "play", "system", "content", "google search", "youtube search", "send mail"]
 
+def ResetChatLog():
+    path = r'Data\ChatLog.json'
+
+    try:
+        # create file if missing
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump([], f)
+
+        # reset content
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([], f, indent=4)
+
+        print("[INFO] ChatLog reset successfully.")
+
+    except Exception as e:
+        print(f"[ResetChatLog Error]: {e}")
 
 def ShowDefaultChatIfNoChats():
     try:
@@ -84,6 +101,7 @@ def ShowChatsOnGUI():
 
 
 def InitialExecution():
+    ResetChatLog() 
     SetMicrophoneStatus("False")
     ShowTextToScreen("")
     ShowDefaultChatIfNoChats()

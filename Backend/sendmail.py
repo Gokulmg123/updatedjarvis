@@ -1,7 +1,7 @@
 """
 sendmail.py — AI-generated email composition and sending.
 Uses Groq (llama-3.3-70b-versatile) to generate email content.
-Credentials are read from the .env file.
+Includes sender name and clean success response.
 """
 
 import smtplib
@@ -12,10 +12,12 @@ import os
 from groq import Groq
 from dotenv import dotenv_values
 
+# Load environment variables
 env_vars = dotenv_values(".env")
 GroqAPIKey  = env_vars.get("GroqAPIKey")
 SenderEmail = env_vars.get("SenderEmail", "")
 SenderPass  = env_vars.get("SenderPassword", "")
+SenderName  = env_vars.get("SenderName", "Sender")
 
 client = Groq(api_key=GroqAPIKey)
 
@@ -26,49 +28,57 @@ def generate_email_body(subject: str) -> str:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-               {
-    "role": "system",
-    "content": (
-        "You are a professional email writer.\n"
-        "Write concise, natural, and realistic emails.\n\n"
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a professional email writer.\n"
+                        "Write concise, natural, and realistic emails.\n\n"
 
-        "STRICT RULES:\n"
-        "- NEVER use placeholders like [Name], [Your Name], [Company], etc.\n"
-        "- NEVER write 'Dear Sir/Madam'. Use a natural greeting like 'Hello' or omit if unknown.\n"
-        "- NEVER include bracketed text.\n"
-        "- Do NOT leave blanks for the user to fill.\n"
-        "- Use a real-world tone, as if the sender is writing directly.\n"
-        "- End with a simple closing like 'Best regards' or 'Thanks'.\n"
-        "- Keep it human-like, not robotic or templated.\n\n"
+                        "STRICT RULES:\n"
+                        "- NEVER use placeholders like [Name], [Your Name], etc.\n"
+                        "- write 'Dear Sir/Madam'.\n"
+                        "- Do NOT leave blanks.\n"
+                        "- Use a real-world tone.\n"
+                        "- End with a closing and sender name.\n"
+                        f"- Sender name: {SenderName}\n\n"
 
-        "Write complete, ready-to-send emails only."
-    ),
-},
+                        "Write complete emails only."
+                    ),
+                },
                 {
                     "role": "user",
-                    "content": f"Write a professional email about: {subject}",
+                    "content": f"Write a professional email about: {subject}. Include the sender name at the end.",
                 },
             ],
             max_tokens=512,
             temperature=0.7,
-            stream=False,
         )
-        return completion.choices[0].message.content.strip()
+
+        body = completion.choices[0].message.content.strip()
+
+        # Ensure sender name exists
+        if SenderName.lower() not in body.lower():
+            body += f"\n\nBest regards,\n{SenderName}"
+
+        return body
+
     except Exception as e:
-        print(f"[sendmail] AI generation error: {e}")
-        return f"Dear Recipient,\n\nThis email is regarding: {subject}.\n\nBest regards."
+        print(f"[sendmail] AI error: {e}")
+        return f"Hello,\n\nThis email is regarding: {subject}.\n\nBest regards,\n{SenderName}"
 
 
 def open_in_notepad(file_path: str):
     try:
         subprocess.Popen(["notepad.exe", file_path])
     except Exception as e:
-        print(f"[sendmail] Notepad open error: {e}")
+        print(f"[sendmail] Notepad error: {e}")
 
 
 def compose_email(subject: str) -> str:
-    """Generate and save email to a .txt file, then open in Notepad."""
+    """Generate and save email to file."""
     body = generate_email_body(subject)
+
+    os.makedirs("Data", exist_ok=True)
     safe_name = subject.lower().replace(" ", "")[:50]
     file_path = rf"Data\{safe_name}.txt"
 
@@ -77,54 +87,37 @@ def compose_email(subject: str) -> str:
             f.write(body)
         open_in_notepad(file_path)
     except Exception as e:
-        print(f"[sendmail] File write error: {e}")
+        print(f"[sendmail] File error: {e}")
 
     return body
 
 
 def parse_mail_query(query: str):
-    """
-    Parse a query of the form '<subject> to <recipient@email.com>'.
-    Returns (subject, recipient_email).
-    If no email is found, recipient_email is None.
-
-    Examples:
-        'job to gokul@gmail.com'          -> ('job', 'gokul@gmail.com')
-        'interview invitation to hr@x.com' -> ('interview invitation', 'hr@x.com')
-        'project update'                  -> ('project update', None)
-    """
+    """Extract subject and email from query."""
     import re
-    # Match " to <email>" pattern — email regex keeps original case
+
     match = re.search(
         r'\bto\s+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})',
-        query, re.IGNORECASE
+        query,
+        re.IGNORECASE,
     )
+
     if match:
-        receiver_email = match.group(1)          # original case preserved
-        subject = query[:match.start()].strip()  # everything before ' to <email>'
+        receiver_email = match.group(1)
+        subject = query[:match.start()].strip()
         if not subject:
             subject = "Important Update"
         return subject, receiver_email
-    # No email found in query
+
     return query.strip(), None
 
 
 def sendmail(query: str) -> str:
-    """
-    Compose and send an AI-generated email.
-    'query' is a natural-language string like 'job to gokul@gmail.com'.
-    Returns a status message string.
-    """
+    """Main function to send email and return status message."""
     subject, receiver_email = parse_mail_query(query)
 
     if not receiver_email:
-        msg = (
-            "\u274c Could not find a recipient email in your request.\n"
-            "   Please say something like:\n"
-            "   'Send an email about job to gokul@gmail.com'"
-        )
-        print(msg)
-        return msg
+        return "❌ No recipient found. Try: 'job to email@gmail.com'"
 
     print(f"[sendmail] Subject   : {subject}")
     print(f"[sendmail] Recipient : {receiver_email}")
@@ -133,16 +126,11 @@ def sendmail(query: str) -> str:
     print(f"\n[Generated Email]\n{body}\n")
 
     if not SenderEmail or not SenderPass:
-        msg = (
-            "\u274c Missing email credentials.\n"
-            "   Add SenderEmail and SenderPassword to your .env file."
-        )
-        print(msg)
-        return msg
+        return "❌ Missing email credentials in .env"
 
     email_msg = MIMEMultipart()
-    email_msg["From"]    = SenderEmail
-    email_msg["To"]      = receiver_email
+    email_msg["From"] = SenderEmail
+    email_msg["To"] = receiver_email
     email_msg["Subject"] = subject
     email_msg.attach(MIMEText(body, "plain"))
 
@@ -152,18 +140,16 @@ def sendmail(query: str) -> str:
         server.login(SenderEmail, SenderPass)
         server.sendmail(SenderEmail, receiver_email, email_msg.as_string())
         server.quit()
-        status = f"\u2705 Email sent successfully to {receiver_email}"
-        print(status)
-        return status
+
+        return "✅ Done! Email sent successfully."
+
     except Exception as e:
-        status = f"\u274c Failed to send email: {e}"
-        print(status)
-        return status
+        print(f"[sendmail] SMTP error: {e}")
+        return "❌ Failed to send email. Check credentials or internet."
 
 
+# CLI Testing
 if __name__ == "__main__":
-    # CLI test: python sendmail.py
-    # Example input: job to gokul@gmail.com
     raw = input("Enter query (e.g. 'job to gokul@gmail.com'): ").strip()
     result = sendmail(raw)
-    print(result)
+    print("\n" + result)
