@@ -61,20 +61,16 @@ def ChatBot(Query):
         messages.append({"role": "user", "content": Query})
 
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Updated: llama3-70b-8192 is deprecated
+            model="llama-3.1-8b-instant",  # Updated: llama3-70b-8192 is deprecated
             messages=SystemChatBot + [{"role": "system", "content": RealtimeInformation()}] + messages,
             max_tokens=1024,
             temperature=0.7,
             top_p=1,
-            stream=True,
+            stream=False,
             stop=None
         )
 
-        Answer = ""
-
-        for chunk in completion:
-            if chunk.choices[0].delta.content:
-                Answer += chunk.choices[0].delta.content
+        Answer = completion.choices[0].message.content
 
         Answer = Answer.replace("</s>", "")
 

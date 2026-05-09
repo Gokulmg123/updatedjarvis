@@ -1,8 +1,12 @@
-from googlesearch import search
+from duckduckgo_search import DDGS
 from groq import Groq
 from json import load, dump, JSONDecodeError
 import datetime
 from dotenv import dotenv_values
+
+# =========================
+# LOAD ENV VARIABLES
+# =========================
 
 env_vars = dotenv_values(".env")
 
@@ -10,48 +14,107 @@ Username = env_vars.get("Username")
 Assistantname = env_vars.get("Assistantname")
 GroqAPIKey = env_vars.get("GroqAPIKey")
 
+# =========================
+# GROQ CLIENT
+# =========================
+
 client = Groq(api_key=GroqAPIKey)
 
-System = f"""Hello, I am {Username}, You are a very accurate and advanced AI chatbot named {Assistantname} which has real-time up-to-date information from the internet.
-*** Provide Answers In a Professional Way, make sure to add full stops, commas, question marks, and use proper grammar.***
-*** Just answer the question from the provided data in a professional way. ***"""
+# =========================
+# SYSTEM PROMPT
+# =========================
+
+System = f"""
+Hello, I am {Username}.
+
+You are a highly advanced AI assistant named {Assistantname} with access to real-time internet search results.
+
+Provide answers professionally using proper grammar, punctuation, and formatting.
+
+Use the provided real-time search data whenever necessary.
+
+Do not mention that you are using search results unless asked.
+"""
+
+# =========================
+# LOAD CHAT HISTORY
+# =========================
 
 try:
     with open(r"Data\ChatLog.json", "r") as f:
         messages = load(f)
+
 except (FileNotFoundError, JSONDecodeError):
+
     with open(r"Data\ChatLog.json", "w") as f:
         dump([], f)
+
     messages = []
 
-def GoogleSearch(query):
-    try:
-        results = list(search(query, advanced=True, num_results=5))
-        Answer = f"The search results for '{query}' are:\n[start]\n"
+# =========================
+# REALTIME SEARCH FUNCTION
+# =========================
 
-        for i in results:
-            Answer += f"Title: {i.title}\nDescription: {i.description}\n\n"
+def DuckDuckGoSearch(query):
+
+    try:
+
+        Answer = f"Real-time search results for '{query}':\n[start]\n\n"
+
+        with DDGS() as ddgs:
+
+            results = list(ddgs.text(query, max_results=5))
+
+            if not results:
+                return "No real-time search results found."
+
+            for index, result in enumerate(results, start=1):
+
+                title = result.get("title", "No Title")
+                body = result.get("body", "No Description")
+                href = result.get("href", "No Link")
+
+                Answer += (
+                    f"Result {index}:\n"
+                    f"Title: {title}\n"
+                    f"Description: {body}\n"
+                    f"Link: {href}\n\n"
+                )
 
         Answer += "[end]"
+
+        print("\n========== SEARCH RESULTS ==========\n")
+        print(Answer)
+        print("\n====================================\n")
+
         return Answer
+
     except Exception as e:
-        print(f"[GoogleSearch Error]: {e}")
+
+        print(f"[DuckDuckGoSearch Error]: {e}")
+
         return f"Could not retrieve search results for '{query}'."
 
-def AnswerModifier(Answer):
-    lines = Answer.split('\n')
-    non_empty_lines = [line for line in lines if line.strip()]
-    modified_answer = '\n'.join(non_empty_lines)
-    return modified_answer
+# =========================
+# CLEAN ANSWER
+# =========================
 
-SystemChatBot = [
-    {"role": "system", "content": System},
-    {"role": "user", "content": "Hi"},
-    {"role": "assistant", "content": "Hello, how can I help you?"}
-]
+def AnswerModifier(answer):
+
+    lines = answer.split("\n")
+
+    non_empty_lines = [line for line in lines if line.strip()]
+
+    return "\n".join(non_empty_lines)
+
+# =========================
+# REALTIME DATE/TIME INFO
+# =========================
 
 def Information():
+
     current_datetime = datetime.datetime.now()
+
     day = current_datetime.strftime("%A")
     date = current_datetime.strftime("%d")
     month = current_datetime.strftime("%B")
@@ -60,61 +123,141 @@ def Information():
     minute = current_datetime.strftime("%M")
     second = current_datetime.strftime("%S")
 
-    data = f"Use This Real-time information if needed,\n"
-    data += f"Day: {day}\n"
-    data += f"Date: {date}\n"
-    data += f"Month: {month}\n"
-    data += f"Year: {year}\n"
-    data += f"Time: {hour} hours :{minute} minutes :{second} seconds.\n"
+    data = (
+        f"Current Date and Time Information:\n"
+        f"Day: {day}\n"
+        f"Date: {date}\n"
+        f"Month: {month}\n"
+        f"Year: {year}\n"
+        f"Time: {hour}:{minute}:{second}\n"
+    )
+
     return data
 
+# =========================
+# MAIN REALTIME ENGINE
+# =========================
+
 def RealtimeSearchEngine(prompt):
+
     global messages
 
+    # =========================
+    # LOAD CHAT HISTORY AGAIN
+    # =========================
+
     try:
+
         with open(r"Data\ChatLog.json", "r") as f:
             messages = load(f)
+
     except (FileNotFoundError, JSONDecodeError):
+
         messages = []
 
-    messages.append({"role": "user", "content": f"{prompt}"})
+    # =========================
+    # ADD USER MESSAGE
+    # =========================
 
-    search_results = GoogleSearch(prompt)
-    context_messages = SystemChatBot + [
-        {"role": "system", "content": search_results},
-        {"role": "system", "content": Information()}
+    messages.append(
+        {
+            "role": "user",
+            "content": prompt
+        }
+    )
+
+    # =========================
+    # GET REALTIME SEARCH DATA
+    # =========================
+
+    realtime_search = DuckDuckGoSearch(prompt)
+
+    # =========================
+    # PREPARE CONTEXT
+    # =========================
+
+    context_messages = [
+
+        {
+            "role": "system",
+            "content": System
+        },
+
+        {
+            "role": "system",
+            "content": Information()
+        },
+
+        {
+            "role": "system",
+            "content": realtime_search
+        }
+
     ] + messages
 
+    # =========================
+    # GENERATE AI RESPONSE
+    # =========================
+
     try:
+
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",   # Updated: llama3-70b-8192 is deprecated
+
+            model="llama-3.1-8b-instant",
+
             messages=context_messages,
+
             temperature=0.7,
+
             max_tokens=2048,
+
             top_p=1,
-            stream=True,
-            stop=None
+
+            stream=False
+
         )
 
-        Answer = ""
-
-        for chunk in completion:
-            if chunk.choices[0].delta.content:
-                Answer += chunk.choices[0].delta.content
+        Answer = completion.choices[0].message.content
 
         Answer = Answer.strip().replace("</s>", "")
-        messages.append({"role": "assistant", "content": Answer})
+
+        # =========================
+        # SAVE ASSISTANT RESPONSE
+        # =========================
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": Answer
+            }
+        )
 
         with open(r"Data\ChatLog.json", "w") as f:
+
             dump(messages, f, indent=4)
 
-        return AnswerModifier(Answer=Answer)
+        return AnswerModifier(Answer)
 
     except Exception as e:
+
         print(f"[RealtimeSearchEngine Error]: {e}")
-        return "I encountered an issue with the search. Please try again."
+
+        return "I encountered an issue while processing your request."
+
+# =========================
+# MAIN LOOP
+# =========================
 
 if __name__ == "__main__":
+
     while True:
-        prompt = input("Enter your query: ")
-        print(RealtimeSearchEngine(prompt))
+
+        prompt = input("\nEnter your query: ")
+
+        if prompt.lower() == "exit":
+            break
+
+        response = RealtimeSearchEngine(prompt)
+
+        print("\nAssistant:\n")
+        print(response)

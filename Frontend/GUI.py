@@ -46,6 +46,7 @@ from YouTubeGestureController import YouTubeGestureWidget
 _ENV_PATH     = os.path.join(_ROOT_DIR, ".env")
 env_vars      = dotenv_values(_ENV_PATH)
 Assistantname = env_vars.get("Assistantname", "Jarvis")
+Username      = env_vars.get("Username", "You")
 old_chat_message = ""
 TempDirPath      = os.path.join(_ROOT_DIR, "Frontend", "Files")
 GraphicsDirPath  = os.path.join(_ROOT_DIR, "Frontend", "Graphics")
@@ -459,8 +460,8 @@ class ChatBubble(QWidget):
             bl.setContentsMargins(14, 10, 16, 10)
             bl.setSpacing(4)
 
-            tag = QLabel()
-            tag.setStyleSheet(f"color:{C_BOT_TAG};font-size:18px;font-weight:700;"
+            tag = QLabel(Assistantname.upper())
+            tag.setStyleSheet(f"color:{C_BOT_TAG};font-size:11px;font-weight:700;"
                               f"letter-spacing:2px;background:transparent;border:none;")
             bl.addWidget(tag)
 
@@ -768,7 +769,10 @@ class ChatSection(QWidget):
         if not query:
             return
         self.text_field.clear()
+        # Show user bubble immediately for instant feedback
         self._chat.addBubble(query, is_user=True)
+        # Remember this query so loadMessages() skips it when Responses.data updates
+        self._last_typed_query = query
         SetUserQuery(query)
         SetMicrophoneStatus("True")
 
@@ -788,13 +792,57 @@ class ChatSection(QWidget):
             parent = parent.parent()
 
     def loadMessages(self):
+        """
+        Parse Responses.data. It is fully overwritten on each update.
+        We detect changes, parse lines for 'Username :' / 'Assistantname :'
+        prefixes, and group multi-line text (like email previews) correctly.
+        """
         global old_chat_message
         try:
             with open(TempDirectoryPath('Responses.data'), "r", encoding='utf-8') as f:
-                messages = f.read()
-            if messages and len(messages) > 1 and str(old_chat_message) != str(messages):
-                self._chat.addBubble(messages, is_user=False)
-                old_chat_message = messages
+                raw = f.read()
+
+            if not raw.strip() or str(old_chat_message) == str(raw):
+                return
+                
+            old_chat_message = raw
+
+            user_prefix = f"{Username} :"
+            bot_prefix  = f"{Assistantname} :"
+
+            messages_to_add = []
+            current_message = ""
+            current_is_user = False
+
+            for line in raw.splitlines():
+                if line.startswith(user_prefix):
+                    if current_message:
+                        messages_to_add.append((current_message.strip(), current_is_user))
+                    current_message = line[len(user_prefix):].strip()
+                    current_is_user = True
+                elif line.startswith(bot_prefix):
+                    if current_message:
+                        messages_to_add.append((current_message.strip(), current_is_user))
+                    current_message = line[len(bot_prefix):].strip()
+                    current_is_user = False
+                else:
+                    # Continuation of current message (e.g. multi-line email preview)
+                    if current_message:
+                        current_message += "\n" + line
+                    else:
+                        current_message = line
+                        current_is_user = False
+            
+            if current_message:
+                messages_to_add.append((current_message.strip(), current_is_user))
+
+            for msg_text, is_user in messages_to_add:
+                # Prevent double-bubbling GUI typed text
+                if is_user and msg_text == getattr(self, '_last_typed_query', ''):
+                    self._last_typed_query = "" # clear so future duplicate spoken queries work
+                    continue
+                self._chat.addBubble(msg_text, is_user=is_user)
+
         except Exception:
             pass
 

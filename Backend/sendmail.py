@@ -8,6 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import subprocess
+import re
 import os
 from groq import Groq
 from dotenv import dotenv_values
@@ -26,7 +27,7 @@ def generate_email_body(subject: str) -> str:
     """Generate a professional email body using Groq."""
     try:
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",
@@ -79,7 +80,10 @@ def compose_email(subject: str) -> str:
     body = generate_email_body(subject)
 
     os.makedirs("Data", exist_ok=True)
-    safe_name = subject.lower().replace(" ", "")[:50]
+    # SECURITY FIX: strip path separators and special chars to prevent traversal
+    safe_name = re.sub(r'[^\w\-]', '', subject.lower().replace(" ", ""))[:50]
+    if not safe_name:
+        safe_name = "email_draft"
     file_path = rf"Data\{safe_name}.txt"
 
     try:
@@ -112,12 +116,64 @@ def parse_mail_query(query: str):
     return query.strip(), None
 
 
-def sendmail(query: str) -> str:
-    """Main function to send email and return status message."""
+# SECURITY: pending confirmation cache — keyed by recipient so the caller
+# can match preview → confirm without ambiguity.
+_pending_email: dict = {}
+
+
+def sendmail(query: str, confirm: bool = False) -> str:
+    """
+    Two-step email send with mandatory human confirmation.
+
+    First call  (confirm=False):
+        - Parses + generates the email body.
+        - Caches it in _pending_email.
+        - Returns a preview string asking the user to confirm.
+
+    Second call (confirm=True):
+        - Retrieves the cached email.
+        - Actually sends it via SMTP.
+        - Clears the cache.
+
+    This prevents the AI from sending emails without user approval.
+    """
+    global _pending_email
+
+    # ── STEP 2: User confirmed — send the cached email ────────────────────────
+    if confirm:
+        if not _pending_email:
+            return "❌ No pending email found. Please make the email request first."
+
+        subject        = _pending_email.get("subject", "")
+        receiver_email = _pending_email.get("receiver_email", "")
+        body           = _pending_email.get("body", "")
+        _pending_email.clear()  # in-place clear keeps the module-level reference valid
+
+        if not SenderEmail or not SenderPass:
+            return "❌ Missing email credentials in .env"
+
+        email_msg = MIMEMultipart()
+        email_msg["From"]    = SenderEmail
+        email_msg["To"]      = receiver_email
+        email_msg["Subject"] = subject
+        email_msg.attach(MIMEText(body, "plain"))
+
+        try:
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.starttls()
+            server.login(SenderEmail, SenderPass)
+            server.sendmail(SenderEmail, receiver_email, email_msg.as_string())
+            server.quit()
+            return "✅ Done! Email sent successfully."
+        except Exception as e:
+            print(f"[sendmail] SMTP error: {e}")
+            return "❌ Failed to send email. Check credentials or internet."
+
+    # ── STEP 1: Preview — parse, generate and ask for confirmation ────────────
     subject, receiver_email = parse_mail_query(query)
 
     if not receiver_email:
-        return "❌ No recipient found. Try: 'job to email@gmail.com'"
+        return "❌ No recipient found. Try: 'send a mail about job to email@gmail.com'"
 
     print(f"[sendmail] Subject   : {subject}")
     print(f"[sendmail] Recipient : {receiver_email}")
@@ -125,31 +181,34 @@ def sendmail(query: str) -> str:
     body = compose_email(subject)
     print(f"\n[Generated Email]\n{body}\n")
 
-    if not SenderEmail or not SenderPass:
-        return "❌ Missing email credentials in .env"
+    # Cache for the confirmation step (in-place update keeps external ref valid)
+    _pending_email.clear()
+    _pending_email.update({
+        "subject":        subject,
+        "receiver_email": receiver_email,
+        "body":           body,
+    })
 
-    email_msg = MIMEMultipart()
-    email_msg["From"] = SenderEmail
-    email_msg["To"] = receiver_email
-    email_msg["Subject"] = subject
-    email_msg.attach(MIMEText(body, "plain"))
-
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(SenderEmail, SenderPass)
-        server.sendmail(SenderEmail, receiver_email, email_msg.as_string())
-        server.quit()
-
-        return "✅ Done! Email sent successfully."
-
-    except Exception as e:
-        print(f"[sendmail] SMTP error: {e}")
-        return "❌ Failed to send email. Check credentials or internet."
+    preview = (
+        f"📧 Email Preview\n"
+        f"To      : {receiver_email}\n"
+        f"Subject : {subject}\n"
+        f"───────────────────────\n"
+        f"{body[:300]}{'...' if len(body) > 300 else ''}\n"
+        f"───────────────────────\n"
+        f"Say 'yes send it' to confirm, or 'cancel email' to abort."
+    )
+    return preview
 
 
 # CLI Testing
 if __name__ == "__main__":
     raw = input("Enter query (e.g. 'job to gokul@gmail.com'): ").strip()
-    result = sendmail(raw)
-    print("\n" + result)
+    preview = sendmail(raw)          # Step 1 — preview
+    print("\n" + preview + "\n")
+    answer = input("Send? (yes/no): ").strip().lower()
+    if answer in ("yes", "y"):
+        result = sendmail(raw, confirm=True)  # Step 2 — send
+        print("\n" + result)
+    else:
+        print("Email cancelled.")

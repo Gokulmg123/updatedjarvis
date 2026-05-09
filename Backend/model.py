@@ -71,7 +71,7 @@ def FirstLayerDMM(prompt: str = "test"):
 
     try:
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",   # Updated: llama3-70b-8192 is deprecated
+            model="llama-3.1-8b-instant",   # Updated: llama3-70b-8192 is deprecated
             messages=[system_message] + messages,
             max_tokens=200,
             temperature=0.3,   # Lower temperature = more consistent decisions

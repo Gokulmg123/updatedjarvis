@@ -11,6 +11,7 @@ import subprocess
 import requests
 import keyboard
 import asyncio
+import re
 import os
 from Backend.sendmail import sendmail
 
@@ -66,7 +67,7 @@ def Content(Topic):
         messages.append({"role": "user", "content": f"{prompt}"})
 
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Updated: mixtral-8x7b-32768 is deprecated
+            model="llama-3.1-8b-instant",  # Updated: mixtral-8x7b-32768 is deprecated
             messages=SystemChatBot + messages,
             max_tokens=2048,
             temperature=0.7,
@@ -90,7 +91,11 @@ def Content(Topic):
         pass
     else:
         ContentByAI = ContentWriterAI(Topic)
-        safe_name = Topic.lower().replace(' ', '')[:50]
+        # SECURITY FIX: strip all characters except word chars and hyphens
+        # to prevent path traversal attacks (e.g. "../../main.py").
+        safe_name = re.sub(r'[^\w\-]', '', Topic.lower().replace(' ', ''))[:50]
+        if not safe_name:
+            safe_name = "content_output"
         with open(rf"Data\{safe_name}.txt", "w", encoding="utf-8") as file:
             file.write(ContentByAI)
         OpenNotepad(rf"Data\{safe_name}.txt")

@@ -62,8 +62,10 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 
 # ── PyAutoGUI global safety ───────────────────────────────────────────────────
-pyautogui.FAILSAFE = False
-pyautogui.PAUSE    = 0.0
+# SECURITY FIX: FAILSAFE must stay True so moving the mouse to any screen
+# corner raises FailSafeException and stops runaway automation immediately.
+pyautogui.FAILSAFE = True
+pyautogui.PAUSE    = 0.0   # 0.0 keeps gesture response real-time
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Tuning constants

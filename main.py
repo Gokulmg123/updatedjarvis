@@ -23,6 +23,7 @@ from time import sleep
 import subprocess
 import threading
 import json
+import sys
 import os
 
 env_vars = dotenv_values(".env")
@@ -127,6 +128,13 @@ def GetTextQuery():
     return ""
 
 
+# Phrases the user can say to confirm a pending email send.
+_EMAIL_CONFIRM_PHRASES = {
+    "yes", "yes send it", "yes send", "send it", "send now",
+    "confirm email", "confirm", "ok send it", "okay send it", "sure send it",
+}
+
+
 def MainExecution():
     TaskExecution = False
     ImageExecution = False
@@ -140,22 +148,41 @@ def MainExecution():
         ShowTextToScreen(f"{Username} : {TextQuery}")
 
     else:
-        # FIX: Set status so user knows assistant is listening
         SetAssistantStatus("Listening ... ")
         Query = SpeechRecognition()
 
-        # FIX: If mic was turned off mid-capture or nothing was heard, bail
-        # out cleanly without processing an empty/partial query.
         if not Query or not Query.strip():
             SetAssistantStatus("Available ... ")
             return False
 
         ShowTextToScreen(f"{Username} : {Query}")
 
-    # FIX: Immediately turn off mic AFTER we have a confirmed, non-empty query.
-    # In the old code this happened in FirstThread AFTER MainExecution returned,
-    # which meant a second trigger could fire before the first finished.
     SetMicrophoneStatus("False")
+
+    # ── EMAIL CONFIRMATION INTERCEPT ────────────────────────────────────────
+    # Must happen BEFORE FirstLayerDMM, because the AI will classify
+    # "yes send it" as "general yes send it" and the send mail branch
+    # is never reached. We check here directly.
+    import Backend.sendmail as _sm
+    raw_lower = Query.lower().strip().rstrip(".?!")
+    if raw_lower in _EMAIL_CONFIRM_PHRASES and _sm._pending_email:
+        SetAssistantStatus("Sending email...")
+        result = sendmail("", confirm=True)
+        ShowTextToScreen(f"{Assistantname} : {result}")
+        TextToSpeech(result)
+        SetAssistantStatus("Available ... ")
+        return True
+
+    # ── ABORT / CANCEL PENDING EMAIL ────────────────────────────────────────
+    cancel_phrases = {"cancel email", "cancel", "no", "abort", "don't send", "dont send"}
+    if raw_lower in cancel_phrases and _sm._pending_email:
+        _sm._pending_email.clear()
+        msg = "Okay, email cancelled."
+        ShowTextToScreen(f"{Assistantname} : {msg}")
+        TextToSpeech(msg)
+        SetAssistantStatus("Available ... ")
+        return True
+    # ────────────────────────────────────────────────────────────────────────
 
     SetAssistantStatus("Thinking... ")
     Decision = FirstLayerDMM(Query)
@@ -222,10 +249,14 @@ def MainExecution():
                     return True
 
                 elif "send mail" in Queries:
-                    SetAssistantStatus("Sending email...")
+                    SetAssistantStatus("Composing email...")
                     QueryFinal = Queries.replace("send mail", "").strip()
+                    # First call only — returns a preview asking for confirmation.
+                    # The actual send is handled by the intercept block above
+                    # BEFORE FirstLayerDMM so the AI never swallows "yes send it".
                     result = sendmail(QueryFinal)
                     ShowTextToScreen(f"{Assistantname} : {result}")
+                    TextToSpeech(result)
                     SetAssistantStatus("Available ... ")
 
                 elif "exit" in Queries:
@@ -234,7 +265,7 @@ def MainExecution():
                     ShowTextToScreen(f"{Assistantname} : {Answer}")
                     SetAssistantStatus("Answering ... ")
                     TextToSpeech(Answer)
-                    os._exit(1)
+                    sys.exit(0)  # FIXED: was os._exit(1) which skips all cleanup
 
 
 def FirstThread():

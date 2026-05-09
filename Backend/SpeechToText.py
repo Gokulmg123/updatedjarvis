@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from dotenv import dotenv_values
 import os
+import time
 import mtranslate as mt
 
 env_Vars = dotenv_values(".env")
@@ -149,6 +150,7 @@ def SpeechRecognition():
 
         except Exception:
             pass
+        time.sleep(0.05)
 
 
 if __name__ == "__main__":
