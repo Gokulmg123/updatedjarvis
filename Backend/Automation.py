@@ -114,35 +114,104 @@ def PlayYoutube(query):
     return True
 
 
+# ── Known Windows built-in apps (UWP & legacy) that AppOpener may miss ────────
+KNOWN_APPS = {
+    "calculator":   "calc.exe",
+    "notepad":      "notepad.exe",
+    "paint":        "mspaint.exe",
+    "wordpad":      "wordpad.exe",
+    "task manager": "taskmgr.exe",
+    "cmd":          "cmd.exe",
+    "command prompt": "cmd.exe",
+    "explorer":     "explorer.exe",
+    "file explorer": "explorer.exe",
+    "settings":     "ms-settings:",
+    "camera":       "microsoft.windows.camera:",
+    "photos":       "ms-photos:",
+    "calendar":     "outlookcal:",
+    "clock":        "ms-clock:",
+    "snipping tool": "SnippingTool.exe",
+    "sticky notes": "stikynot.exe",
+}
+
+# ── Known websites — open directly rather than Google-scraping ─────────────────
+KNOWN_SITES = {
+    "facebook":    "https://www.facebook.com",
+    "instagram":   "https://www.instagram.com",
+    "twitter":     "https://twitter.com",
+    "x":           "https://twitter.com",
+    "youtube":     "https://www.youtube.com",
+    "whatsapp":    "https://web.whatsapp.com",
+    "gmail":       "https://mail.google.com",
+    "google":      "https://www.google.com",
+    "github":      "https://www.github.com",
+    "linkedin":    "https://www.linkedin.com",
+    "reddit":      "https://www.reddit.com",
+    "amazon":      "https://www.amazon.com",
+    "netflix":     "https://www.netflix.com",
+    "spotify":     "https://open.spotify.com",
+    "maps":        "https://maps.google.com",
+    "google maps": "https://maps.google.com",
+    "chatgpt":     "https://chat.openai.com",
+    "bard":        "https://bard.google.com",
+    "gemini":      "https://gemini.google.com",
+}
+
 def OpenApp(app, sess=requests.session()):
+    app_lower = app.strip().lower()
+
+    # ── Priority 1: Known websites → open directly in browser ─────────────────
+    if app_lower in KNOWN_SITES:
+        print(f"[OpenApp] Known site: opening {KNOWN_SITES[app_lower]}")
+        webopen(KNOWN_SITES[app_lower])
+        return True
+
+    # ── Priority 2: Known Windows apps → launch via subprocess ────────────────
+    if app_lower in KNOWN_APPS:
+        cmd = KNOWN_APPS[app_lower]
+        print(f"[OpenApp] Known app: launching {cmd}")
+        try:
+            if cmd.endswith(":"):           # ms-settings:, ms-photos:, etc.
+                os.startfile(cmd)
+            else:
+                subprocess.Popen(cmd, shell=True)
+            return True
+        except Exception as e:
+            print(f"[OpenApp] Known-app launch failed ({cmd}): {e}")
+
+    # ── Priority 3: Try AppOpener (handles installed apps like Chrome, VS Code) ─
     try:
         appopen(app, match_closest=True, output=True, throw_error=True)
         return True
     except Exception:
-        def extract_links(html):
-            if html is None:
-                return []
-            soup = BeautifulSoup(html, "html.parser")
-            links = soup.find_all('a', {'jsname': 'UWckNb'})
-            return [link.get('href') for link in links]
+        pass
 
-        def search_google(query):
-            url = f"https://www.google.com/search?q={query}"
-            headers = {"User-Agent": useragent}
-            try:
-                response = sess.get(url, headers=headers)
-                if response.status_code == 200:
-                    return response.text
-            except Exception:
-                pass
-            return None
+    # ── Priority 4: Google-scrape fallback ────────────────────────────────────
+    def extract_links(html):
+        if html is None:
+            return []
+        soup = BeautifulSoup(html, "html.parser")
+        links = soup.find_all('a', {'jsname': 'UWckNb'})
+        return [link.get('href') for link in links]
 
-        html = search_google(app)
-        if html:
-            links = extract_links(html)
-            if links:
-                webopen(links[0])
-        return True
+    def search_google(query):
+        url = f"https://www.google.com/search?q={query}"
+        headers = {"User-Agent": useragent}
+        try:
+            response = sess.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.text
+        except Exception:
+            pass
+        return None
+
+    print(f"[OpenApp] Falling back to Google search for: {app}")
+    html = search_google(app)
+    if html:
+        links = extract_links(html)
+        if links:
+            webopen(links[0])
+    return True
 
 
 def CloseApp(app):

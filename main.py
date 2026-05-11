@@ -201,71 +201,102 @@ def MainExecution():
             ImageGenerationQuery = str(queries)
             ImageExecution = True
 
-    for queries in Decision:
-        if TaskExecution == False:
-            if any(queries.startswith(func) for func in Functions):
-                run(Automation(list(Decision)))
-                TaskExecution = True
+    # ── Step 1: Run automation tasks (open/close/play/system/content/google search/youtube search) ──
+    # We do this ONCE (not inside a per-query loop) so Automation() receives the full
+    # decision list and only fires a single time.
+    if not TaskExecution:
+        if any(any(q.startswith(func) for func in Functions) for q in Decision):
+            run(Automation(list(Decision)))
+            TaskExecution = True
 
-        if ImageExecution == True:
-            with open(r"Frontend\Files\ImageGeneration.data", "w") as file:
-                file.write(f"{ImageGenerationQuery},True")
+    # ── Step 2: Launch image generation in a background thread ──────────────
+    if ImageExecution:
+        from Backend.ImageGeneration import GenerateImages as _GenImages
 
+        # Strip the "generate image " prefix that the decision model adds
+        img_prompt = ImageGenerationQuery.replace("generate image ", "").strip()
+
+        data_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "Frontend", "Files", "ImageGeneration.data")
+
+        def _run_image_gen(prompt, df):
             try:
-                p1 = subprocess.Popen(['python', r'Backend\ImageGeneration.py'],
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                      stdin=subprocess.PIPE, shell=False)
-                subprocesses.append(p1)
+                _GenImages(prompt)
             except Exception as e:
-                print(f"Error starting ImageGeneration.py: {e}")
+                print(f"[ImageGen Error]: {e}")
+            finally:
+                # Always mark done — even on failure — so the flag doesn't stay True
+                try:
+                    with open(df, "w", encoding="utf-8") as f:
+                        f.write("False,False")
+                except Exception:
+                    pass
 
-        if G and R or R:
-            SetAssistantStatus("Searching ...")
-            Answer = RealtimeSearchEngine(QueryModifier(Mearged_query))
-            ShowTextToScreen(f"{Assistantname} : {Answer}")
-            SetAssistantStatus("Answering ... ")
-            TextToSpeech(Answer)
+        # Mark as in-progress
+        with open(data_file, "w", encoding="utf-8") as file:
+            file.write(f"{img_prompt},True")
+
+        t = threading.Thread(target=_run_image_gen,
+                             args=(img_prompt, data_file),
+                             daemon=True)
+        t.start()
+        print(f"[ImageGen] Generation thread started for: '{img_prompt}'")
+
+    # ── Step 3: If there were no general/realtime queries, we're done ─────────
+    # Pure automation commands (open/close/play etc.) should return here.
+    if not G and not R:
+        if TaskExecution or ImageExecution:
+            SetAssistantStatus("Available ... ")
             return True
 
-        else:
-            for Queries in Decision:
+    # ── Step 4: Handle realtime or general queries ────────────────────────────
+    if G and R or R:
+        SetAssistantStatus("Searching ...")
+        Answer = RealtimeSearchEngine(QueryModifier(Mearged_query))
+        ShowTextToScreen(f"{Assistantname} : {Answer}")
+        SetAssistantStatus("Answering ... ")
+        TextToSpeech(Answer)
+        return True
 
-                if "general" in Queries:
-                    SetAssistantStatus("Thinking ... ")
-                    QueryFinal = Queries.replace("general ", "")
-                    Answer = ChatBot(QueryModifier(QueryFinal))
-                    ShowTextToScreen(f"{Assistantname} : {Answer}")
-                    SetAssistantStatus("Answering ... ")
-                    TextToSpeech(Answer)
-                    return True
+    else:
+        for Queries in Decision:
 
-                elif "realtime" in Queries:
-                    SetAssistantStatus("Searching ... ")
-                    QueryFinal = Queries.replace("realtime ", "")
-                    Answer = RealtimeSearchEngine(QueryModifier(QueryFinal))
-                    ShowTextToScreen(f"{Assistantname} : {Answer}")
-                    SetAssistantStatus("Answering ... ")
-                    TextToSpeech(Answer)
-                    return True
+            if "general" in Queries:
+                SetAssistantStatus("Thinking ... ")
+                QueryFinal = Queries.replace("general ", "")
+                Answer = ChatBot(QueryModifier(QueryFinal))
+                ShowTextToScreen(f"{Assistantname} : {Answer}")
+                SetAssistantStatus("Answering ... ")
+                TextToSpeech(Answer)
+                return True
 
-                elif "send mail" in Queries:
-                    SetAssistantStatus("Composing email...")
-                    QueryFinal = Queries.replace("send mail", "").strip()
-                    # First call only — returns a preview asking for confirmation.
-                    # The actual send is handled by the intercept block above
-                    # BEFORE FirstLayerDMM so the AI never swallows "yes send it".
-                    result = sendmail(QueryFinal)
-                    ShowTextToScreen(f"{Assistantname} : {result}")
-                    TextToSpeech(result)
-                    SetAssistantStatus("Available ... ")
+            elif "realtime" in Queries:
+                SetAssistantStatus("Searching ... ")
+                QueryFinal = Queries.replace("realtime ", "")
+                Answer = RealtimeSearchEngine(QueryModifier(QueryFinal))
+                ShowTextToScreen(f"{Assistantname} : {Answer}")
+                SetAssistantStatus("Answering ... ")
+                TextToSpeech(Answer)
+                return True
 
-                elif "exit" in Queries:
-                    QueryFinal = "Okay, Bye!"
-                    Answer = ChatBot(QueryModifier(QueryFinal))
-                    ShowTextToScreen(f"{Assistantname} : {Answer}")
-                    SetAssistantStatus("Answering ... ")
-                    TextToSpeech(Answer)
-                    sys.exit(0)  # FIXED: was os._exit(1) which skips all cleanup
+            elif "send mail" in Queries:
+                SetAssistantStatus("Composing email...")
+                QueryFinal = Queries.replace("send mail", "").strip()
+                # First call only — returns a preview asking for confirmation.
+                # The actual send is handled by the intercept block above
+                # BEFORE FirstLayerDMM so the AI never swallows "yes send it".
+                result = sendmail(QueryFinal)
+                ShowTextToScreen(f"{Assistantname} : {result}")
+                TextToSpeech(result)
+                SetAssistantStatus("Available ... ")
+
+            elif "exit" in Queries:
+                QueryFinal = "Okay, Bye!"
+                Answer = ChatBot(QueryModifier(QueryFinal))
+                ShowTextToScreen(f"{Assistantname} : {Answer}")
+                SetAssistantStatus("Answering ... ")
+                TextToSpeech(Answer)
+                sys.exit(0)  # FIXED: was os._exit(1) which skips all cleanup
 
 
 def FirstThread():

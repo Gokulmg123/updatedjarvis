@@ -17,10 +17,10 @@ HOW IT WORKS
 
 Gesture Map
 -----------
-  ☝  Index only       →  Cursor pointer  (moves OS mouse)
-  ✊  Closed fist      →  Scroll  (raise fist = scroll up, lower = scroll down)
-  ✌  Index+Mid pinch  →  Click / Select
-  ✋  Open palm 5f     →  Play / Pause  (hold ~0.4 s)
+  ☝  Index only       →  Select / Play  (moves cursor & tap to click/play)
+  ✊  Closed fist      →  Pause  (hold ~0.4 s)
+  ✋  Open palm 5f     →  Scroll  (raise palm = scroll up, lower = scroll down)
+  ✌  Index+Mid pinch  →  Click
   🤙  Pinky only       →  Next video  (Shift+N)
   👍  Thumb only       →  Previous video  (Shift+P)
   🤏  Thumb+Idx pinch  →  Volume  (raise = vol up, lower = vol down)
@@ -71,26 +71,28 @@ pyautogui.PAUSE    = 0.0   # 0.0 keeps gesture response real-time
 #  Tuning constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Cursor (EMA smoothing)
-SMOOTH_ALPHA       = 0.45    # lower  = snappier cursor
+# Cursor (EMA smoothing — lower alpha = snappier, higher = silkier)
+SMOOTH_ALPHA       = 0.55    # heavier smoothing for buttery cursor
+SMOOTH_ALPHA_SCROLL = 0.50   # separate alpha for scroll deltas
 CURSOR_SENSITIVITY = 1.70    # >1 amplifies hand movement across screen
 
-# Scroll (fist)
-FIST_SCROLL_DEAD   = 0.006   # normalised wrist-y dead-zone (filters tremor)
-FIST_SCROLL_SCALE  = 22      # wrist delta → scroll ticks multiplier
-FIST_SCROLL_MAX    = 10      # cap ticks per event
-FIST_VEL_WIN       = 6       # velocity averaging window (frames)
-SCROLL_COOLDOWN    = 0.045   # seconds between scroll events
+# Scroll (open palm)
+PALM_SCROLL_DEAD   = 0.004   # normalised wrist-y dead-zone (filters tremor)
+PALM_SCROLL_SCALE  = 18      # wrist delta → scroll ticks multiplier
+PALM_SCROLL_MAX    = 8       # cap ticks per event
+PALM_VEL_WIN       = 8       # velocity averaging window (frames) — longer = smoother
+SCROLL_COOLDOWN    = 0.035   # seconds between scroll events
+SCROLL_ACCEL_EXP   = 1.4     # exponential acceleration for faster flicks
 
 # Volume (thumb+index pinch)
 VOL_DEAD           = 0.010   # min normalised delta to trigger volume step
 VOL_COOLDOWN       = 0.12    # seconds between volume steps
 
 # Discrete gesture cooldown (click / next / prev / pause)
-GESTURE_COOLDOWN   = 0.55
+GESTURE_COOLDOWN   = 0.50
 
-# Pause needs a brief hold so open-palm transitions don't misfire
-PAUSE_HOLD_FRAMES  = 10
+# Pause (fist) needs a brief hold so transitions don't misfire
+PAUSE_HOLD_FRAMES  = 12
 
 # Pinch thresholds (normalised tip-to-tip distance)
 IDX_MID_PINCH_THR  = 0.052
@@ -113,10 +115,10 @@ _C = dict(
 
 _GESTURE_LABELS = {
     "neutral": "—",
-    "cursor":  "☝  CURSOR",
-    "scroll":  "✊  SCROLL",
+    "select":  "☝  SELECT / PLAY",
+    "scroll":  "✋  SCROLL",
     "click":   "✌  CLICK",
-    "pause":   "✋  PLAY / PAUSE",
+    "pause":   "✊  PAUSE",
     "next":    "🤙  NEXT",
     "prev":    "👍  PREVIOUS",
     "volume":  "🤏  VOLUME",
@@ -132,10 +134,10 @@ _HAND_CONN = [
 ]
 
 _LEGEND = [
-    "☝ INDEX only    = cursor",
-    "✊ FIST          = scroll  ▲▼",
+    "☝ INDEX only    = select / play",
+    "✊ FIST          = pause",
+    "✋ OPEN PALM     = scroll  ▲▼",
     "✌ IDX+MID pinch = click",
-    "✋ OPEN PALM     = play/pause",
     "🤙 PINKY only    = next",
     "👍 THUMB only    = previous",
     "🤏 THUMB+IDX     = volume  ▲▼",
@@ -420,11 +422,12 @@ class _YTWorker(QThread):
         last_action    = 0.0         # cooldown for discrete gestures
         last_scroll    = 0.0
         last_vol       = 0.0
-        pause_frames   = 0           # hold counter for open-palm pause
-        fist_y_hist    = deque(maxlen=FIST_VEL_WIN)
-        prev_fist_y    = None        # wrist-y from previous frame (scroll)
+        pause_frames   = 0           # hold counter for fist pause
+        palm_y_hist    = deque(maxlen=PALM_VEL_WIN)
+        prev_palm_y    = None        # wrist-y from previous frame (palm scroll)
         prev_vol_y     = None        # index-tip y from previous frame (volume)
         click_armed    = True        # resets after pinch releases
+        select_hold    = 0           # frames index held (for play trigger)
         yt_active      = False
         yt_check_t     = 0.0
         chrome_rect    = None
@@ -434,6 +437,9 @@ class _YTWorker(QThread):
         scroll_clear_t = 0.0
         vol_clear_t    = 0.0
         fail_count     = 0
+
+        # Smooth scroll accumulator for sub-pixel precision
+        scroll_accum   = 0.0
 
         try:
             with mp_vision.HandLandmarker.create_from_options(opts) as det:
@@ -495,6 +501,10 @@ class _YTWorker(QThread):
                         px   = int(sx_n * fw)
                         py   = int(sy_n * fh)
 
+                        # EMA-smoothed wrist position (used for palm scroll)
+                        wx_s = _ema(smooth, "wx", wrist.x)
+                        wy_s = _ema(smooth, "wy", wrist.y)
+
                         # Precomputed distances
                         d_idx_mid = _dist(idx_tip, mid_tip)
                         d_thb_idx = _dist(thb_tip, idx_tip)
@@ -527,7 +537,7 @@ class _YTWorker(QThread):
                                          and not st["pinky"]
                                          and d_thb_idx < THB_IDX_PINCH_THR)
 
-                        # ✋ All fingers up
+                        # ✋ All fingers up (open palm)
                         all_up = (st["index"] and st["middle"]
                                   and st["ring"]  and st["pinky"])
 
@@ -535,18 +545,64 @@ class _YTWorker(QThread):
                         fist = _is_fist(lm)
 
                         # ═══════════════════════════════════════════════════════
-                        #  PRIORITY ORDER
+                        #  PRIORITY ORDER  (remapped for natural feel)
                         # ═══════════════════════════════════════════════════════
 
-                        # 1. ✋ Open palm → Play / Pause  (requires brief hold)
+                        # 1. ✋ Open palm → Smooth SCROLL  (wrist Y tracking)
                         if all_up:
+                            pause_frames = 0
+                            select_hold  = 0
+                            cur_g        = "scroll"
+                            prev_vol_y   = None
+                            click_armed  = True
+                            # Use EMA-smoothed wrist Y for buttery scroll
+                            raw_y = wy_s
+
+                            if prev_palm_y is not None:
+                                delta = raw_y - prev_palm_y
+                                sd = _ema(smooth, "sd", delta, SMOOTH_ALPHA_SCROLL)
+                                palm_y_hist.append(sd)
+
+                                if len(palm_y_hist) >= 2:
+                                    avg_d = sum(palm_y_hist) / len(palm_y_hist)
+
+                                    if abs(avg_d) > PALM_SCROLL_DEAD:
+                                        # Exponential acceleration for fast flicks
+                                        raw_ticks = (abs(avg_d) ** SCROLL_ACCEL_EXP) * PALM_SCROLL_SCALE
+                                        scroll_accum += raw_ticks
+
+                                        if scroll_accum >= 1.0 and now - last_scroll > SCROLL_COOLDOWN:
+                                            last_scroll = now
+                                            ticks = max(1, min(PALM_SCROLL_MAX, int(scroll_accum)))
+                                            scroll_accum -= ticks  # keep fractional remainder
+                                            if avg_d < 0:
+                                                scroll_dir = "up"
+                                                if yt_active:
+                                                    pyautogui.scroll(ticks)
+                                            else:
+                                                scroll_dir = "down"
+                                                if yt_active:
+                                                    pyautogui.scroll(-ticks)
+                                            scroll_clear_t = now
+                                            self.gesture.emit("scroll")
+                                    else:
+                                        scroll_accum = 0.0
+                                        if now - scroll_clear_t > 0.15:
+                                            scroll_dir = ""
+
+                            prev_palm_y = raw_y
+                            cursor_pos  = (int(wx_s * fw), int(wy_s * fh))
+
+                        # 2. ✊ Closed fist → PAUSE  (requires brief hold)
+                        elif fist:
                             pause_frames += 1
-                            cur_g      = "pause"
-                            cursor_pos = (px, py)
-                            prev_fist_y = None
-                            prev_vol_y  = None
-                            click_armed = True
-                            fist_y_hist.clear()
+                            select_hold   = 0
+                            cur_g         = "pause"
+                            prev_palm_y   = None
+                            prev_vol_y    = None
+                            click_armed   = True
+                            palm_y_hist.clear()
+                            scroll_accum  = 0.0
                             if (pause_frames >= PAUSE_HOLD_FRAMES
                                     and now - last_action > GESTURE_COOLDOWN):
                                 last_action  = now
@@ -554,14 +610,17 @@ class _YTWorker(QThread):
                                 if yt_active:
                                     _send_key("space")
                                 self.gesture.emit("pause")
+                            cursor_pos = (int(wrist.x * fw), int(wrist.y * fh))
 
-                        # 2. 🤏 Thumb+Idx pinch → Volume
+                        # 3. 🤏 Thumb+Idx pinch → Volume
                         elif thb_idx_pinch:
                             pause_frames = 0
+                            select_hold  = 0
                             cur_g        = "volume"
                             click_armed  = True
-                            prev_fist_y  = None
-                            fist_y_hist.clear()
+                            prev_palm_y  = None
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
                             raw_y = idx_tip.y
 
                             if prev_vol_y is not None:
@@ -582,41 +641,47 @@ class _YTWorker(QThread):
                             prev_vol_y = raw_y
                             cursor_pos = (px, py)
 
-                        # 3. 🤙 Pinky only → Next video
+                        # 4. 🤙 Pinky only → Next video
                         elif only_pky:
                             pause_frames = 0
+                            select_hold  = 0
                             cur_g        = "next"
-                            prev_fist_y  = None
+                            prev_palm_y  = None
                             prev_vol_y   = None
                             click_armed  = True
-                            fist_y_hist.clear()
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
                             if now - last_action > GESTURE_COOLDOWN:
                                 last_action = now
                                 if yt_active:
                                     _send_key("shift+n")
                                 self.gesture.emit("next")
 
-                        # 4. 👍 Thumb only → Previous video
+                        # 5. 👍 Thumb only → Previous video
                         elif only_thb:
                             pause_frames = 0
+                            select_hold  = 0
                             cur_g        = "prev"
-                            prev_fist_y  = None
+                            prev_palm_y  = None
                             prev_vol_y   = None
                             click_armed  = True
-                            fist_y_hist.clear()
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
                             if now - last_action > GESTURE_COOLDOWN:
                                 last_action = now
                                 if yt_active:
                                     _send_key("shift+p")
                                 self.gesture.emit("prev")
 
-                        # 5. ✌ Index+Mid pinch → Click
+                        # 6. ✌ Index+Mid pinch → Click
                         elif idx_mid_pinch:
                             pause_frames = 0
+                            select_hold  = 0
                             cur_g        = "click"
-                            prev_fist_y  = None
+                            prev_palm_y  = None
                             prev_vol_y   = None
-                            fist_y_hist.clear()
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
                             cv2.circle(frame, (px, py), 22, _C["click"], 3)
                             if click_armed and now - last_action > GESTURE_COOLDOWN:
                                 last_action = now
@@ -626,83 +691,65 @@ class _YTWorker(QThread):
                                     _click_at(sx, sy)
                                 self.gesture.emit("click")
 
-                        # 6. ✌ Index+Mid spread → re-arm click
+                        # 7. ✌ Index+Mid spread → re-arm click
                         elif idx_mid_up and not idx_mid_pinch:
                             pause_frames = 0
+                            select_hold  = 0
                             cur_g        = "neutral"
                             click_armed  = True
-                            prev_fist_y  = None
+                            prev_palm_y  = None
                             prev_vol_y   = None
-                            fist_y_hist.clear()
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
 
-                        # 7. ☝ Index only → Cursor pointer  (pure movement, no scroll)
+                        # 8. ☝ Index only → SELECT / PLAY  (cursor + click/play)
                         elif only_idx:
                             pause_frames  = 0
-                            cur_g         = "cursor"
+                            cur_g         = "select"
                             prev_vol_y    = None
-                            prev_fist_y   = None
-                            fist_y_hist.clear()
+                            prev_palm_y   = None
+                            palm_y_hist.clear()
+                            scroll_accum  = 0.0
+                            select_hold  += 1
 
+                            # Move cursor smoothly
                             if yt_active and chrome_rect:
                                 sx, sy = _map_cursor(sx_n, sy_n, chrome_rect)
                                 pyautogui.moveTo(sx, sy, duration=0)
                             cursor_pos = (px, py)
 
-                        # 8. ✊ Closed fist → Smooth scroll
-                        elif fist:
-                            pause_frames = 0
-                            cur_g        = "scroll"
-                            prev_vol_y   = None
-                            click_armed  = True
-                            # Anchor: wrist landmark — stable even with fingers curled
-                            raw_y = wrist.y
-
-                            if prev_fist_y is not None:
-                                fist_y_hist.append(raw_y - prev_fist_y)
-
-                                if len(fist_y_hist) >= 2:
-                                    avg_d = sum(fist_y_hist) / len(fist_y_hist)
-
-                                    if abs(avg_d) > FIST_SCROLL_DEAD:
-                                        if now - last_scroll > SCROLL_COOLDOWN:
-                                            last_scroll = now
-                                            ticks = max(1, min(FIST_SCROLL_MAX,
-                                                               int(abs(avg_d) * FIST_SCROLL_SCALE)))
-                                            if avg_d < 0:           # fist raised  → scroll UP
-                                                scroll_dir = "up"
-                                                if yt_active:
-                                                    pyautogui.scroll(ticks)
-                                            else:                   # fist lowered → scroll DOWN
-                                                scroll_dir = "down"
-                                                if yt_active:
-                                                    pyautogui.scroll(-ticks)
-                                            scroll_clear_t = now
-                                            self.gesture.emit("scroll")
-                                    else:
-                                        if now - scroll_clear_t > 0.15:
-                                            scroll_dir = ""
-
-                            prev_fist_y = raw_y
-                            cursor_pos  = (int(wrist.x * fw), int(wrist.y * fh))
+                            # Auto-play/select after holding index for ~0.5s (~15 frames @ 30fps)
+                            if (select_hold >= 15
+                                    and now - last_action > GESTURE_COOLDOWN):
+                                last_action = now
+                                select_hold = 0
+                                if yt_active and chrome_rect:
+                                    sx, sy = _map_cursor(sx_n, sy_n, chrome_rect)
+                                    _click_at(sx, sy)
+                                self.gesture.emit("select")
 
                         # 9. Neutral
                         else:
                             pause_frames = 0
-                            prev_fist_y  = None
+                            select_hold  = 0
+                            prev_palm_y  = None
                             prev_vol_y   = None
                             click_armed  = True
                             cur_g        = "neutral"
-                            fist_y_hist.clear()
+                            palm_y_hist.clear()
+                            scroll_accum = 0.0
 
                     else:
                         # No hand detected — reset everything
                         smooth.clear()
                         pause_frames = 0
-                        prev_fist_y  = None
+                        select_hold  = 0
+                        prev_palm_y  = None
                         prev_vol_y   = None
                         click_armed  = True
                         cur_g        = "neutral"
-                        fist_y_hist.clear()
+                        palm_y_hist.clear()
+                        scroll_accum = 0.0
 
                     # ── Draw HUD and emit frame ───────────────────────────────
                     _draw_hud(frame, fw, fh, cur_g, yt_active,
@@ -743,11 +790,11 @@ class YouTubeGestureWidget(QWidget):
     yt_lost     = pyqtSignal()
 
     _GESTURE_DESC = {
-        "cursor":  "☝  Pointing",
-        "scroll":  "✊  Scrolling",
+        "select":  "☝  Select / Play",
+        "scroll":  "✋  Scrolling",
         "click":   "✌  Clicked!",
         "volume":  "🤏  Volume",
-        "pause":   "✋  Play / Pause",
+        "pause":   "✊  Paused",
         "next":    "🤙  Next video",
         "prev":    "👍  Previous",
         "neutral": "",
@@ -833,10 +880,10 @@ class YouTubeGestureWidget(QWidget):
         pl.addWidget(h1)
 
         gmap = [
-            ("☝  Index only",       "Cursor pointer"),
-            ("✊  Closed fist",      "Scroll  ▲▼"),
-            ("✌  Index+Mid pinch",  "Click / Select"),
-            ("✋  Open palm",        "Play / Pause"),
+            ("☝  Index only",       "Select / Play"),
+            ("✊  Closed fist",      "Pause"),
+            ("✋  Open palm",        "Scroll  ▲▼"),
+            ("✌  Index+Mid pinch",  "Click"),
             ("🤙  Pinky only",       "Next video"),
             ("👍  Thumb only",       "Previous video"),
             ("🤏  Thumb+Idx pinch",  "Volume  ▲▼"),
